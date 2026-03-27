@@ -105,36 +105,35 @@ graph TD
 | 麦蕊智数 | 股票行情API | 是 | 是 | JSON | ⭐⭐⭐⭐⭐ |
 | 东方财富 | 股票行情 | 是 | 否 | JSON | ⭐⭐⭐⭐ |
 
-### 3.2 信息源1：财经新闻采集（至少2个不同来源）
+### 3.2 一条新闻从采集到入库的完整流程（核心）
 
-```mermaid
-sequenceDiagram
-    participant Scheduler as 定时调度器
-    participant NC as NewsCollector
-    participant SRC1 as NewsAPI.org
-    participant SRC2 as RSSHub/36Kr
-    participant DS as DeduplicationService
-    participant LLM as LLM API
-    participant DB as Database
+一条新闻经过 7 个步骤完成入库，涉及两个外部 API（Embedding + LLM）：
 
-    Scheduler->>NC: 触发采集（每30分钟）
-    
-    par 并行采集多源
-        NC->>SRC1: GET /v2/everything?q=AI+technology
-        SRC1-->>NC: JSON(articles数组)
-        NC->>SRC2: GET /36kr/information/web_news
-        SRC2-->>NC: RSS XML
-    end
-    
-    NC->>NC: 统一解析为NewsArticle列表
-    NC->>DS: 逐条去重检查（URL+标题+内容哈希）
-    DS-->>NC: 去重结果
-    NC->>LLM: 批量结构化提取（标签、摘要、情感、关联股票）
-    LLM-->>NC: 结构化JSON
-    NC->>DB: 存储NewsArticle
+```
+① HTTP采集原始数据（NewsAPI / RSSHub）
+       ↓
+② 解析为原始 NewsArticle（只有标题、内容、来源URL）
+       ↓
+③ 四级去重检查（URL → 标题Jaccard → 内容MD5 → Embedding余弦）
+       ↓ 通过
+④ 调 Embedding API（/v1/embeddings）→ 生成 float[] 向量
+       ↓
+⑤ 调 LLM API（/v1/chat/completions）→ 提取摘要、标签、情感、置信度
+       ↓
+⑥ 组装完整 NewsArticle（结构化字段 + embeddingJson + 溯源信息）
+       ↓
+⑦ 存入 H2（一行记录）+ 内存向量缓存（一条向量）
 ```
 
-#### 数据源A：NewsAPI.org（主力新闻源，权威）
+Embedding 和 LLM 是两个不同的 API，做不同的事：
+- Embedding（`/v1/embeddings`）：文本→数字向量，用于语义去重和相似检索，快
+- LLM（`/v1/chat/completions`）：理解内容→提取标签/情感/摘要/置信度，慢
+
+存储只有一个数据库（H2），向量额外在内存 Map 里存一份方便快速检索。
+
+### 3.3 新闻数据源详情
+
+#### 数据源A：NewsAPI.org（主力新闻源）
 
 注册地址：https://newsapi.org/register （免费，开发阶段无需付费）
 
@@ -280,7 +279,7 @@ GET https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&k=&num=30&page
 
 > 注意：新浪API返回的是JSONP格式，需要去掉callback包装。如果不稳定，优先使用NewsAPI + RSSHub组合。
 
-### 3.3 信息源2：股票行情数据
+### 3.4 行情数据源详情
 
 #### 数据源D：麦蕊智数 mairui.club（推荐，已验证可用）
 
@@ -374,7 +373,7 @@ GET https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=20&po=1&np=1&fltt=2&inv
 # fs=b:BK0800 表示AI概念板块
 ```
 
-### 3.4 采集策略与容错
+### 3.5 采集策略与容错
 
 ```java
 // 采集频率配置
@@ -419,9 +418,7 @@ graph TD
 
 > 关键设计：每个数据源都有备选方案，确保比赛演示时即使某个源挂了也能正常运行。最坏情况下使用预置的种子数据（约50条精选AI科技新闻）保证系统可演示。
 
-### 3.5 数据结构化方案（LLM驱动）
-
-原始数据通过赛方提供的 LLM API 进行结构化提取：
+### 3.6 LLM 结构化提取详情（步骤⑤）
 
 ```java
 // LLM结构化提取的Prompt模板
@@ -481,34 +478,13 @@ public NewsArticle basicExtract(NewsArticle article) {
 }
 ```
 
-### 3.6 Embedding 向量化与内存语义检索
+### 3.7 Embedding 向量化与内存检索详情（步骤④）
 
-#### 架构决策
+#### 为什么用 H2 + 内存而不是 MongoDB + Chroma
 
-采用 H2 + 内存向量缓存的单库方案，而非 MongoDB + Chroma 双库方案。原因：
 - 部署为单个 jar 包，零外部依赖，比赛演示稳定性最高
-- 比赛期间新闻量在几百到几千条级别，内存完全 hold 住
-- H2 嵌入式数据库已在项目中配好，无需额外安装
-
-#### 数据流
-
-```mermaid
-sequenceDiagram
-    participant NC as 新闻采集器
-    participant EMB as Embedding API
-    participant LLM as LLM API
-    participant VC as 内存向量缓存
-    participant DB as H2 Database
-
-    NC->>EMB: POST /v1/embeddings (新闻标题+摘要)
-    EMB-->>NC: 向量 float[1536]
-    NC->>LLM: 结构化提取(标签/情感/溯源/置信度)
-    LLM-->>NC: 结构化JSON
-    NC->>DB: 存储 NewsArticle (结构化数据+溯源+置信度)
-    NC->>VC: 存储 articleId → vector (内存Map)
-    
-    Note over VC: 应用启动时从DB加载所有文章<br/>重新调Embedding API生成向量<br/>或从H2的embedding字段恢复
-```
+- 新闻量几百到几千条，内存完全 hold 住
+- H2 已在项目中配好，无需额外安装
 
 #### 内存向量检索服务
 
