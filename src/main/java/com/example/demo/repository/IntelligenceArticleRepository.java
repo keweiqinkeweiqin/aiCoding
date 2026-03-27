@@ -7,7 +7,7 @@ import java.util.List;
 
 public interface IntelligenceArticleRepository extends JpaRepository<IntelligenceArticle, Long> {
 
-    List<IntelligenceArticle> findByIntelligenceIdOrderByIsPrimaryDesc();
+    List<IntelligenceArticle> findByIntelligenceIdOrderByIsPrimaryDesc(Long intelligenceId);
 
     boolean existsByArticleId(Long articleId);
 }

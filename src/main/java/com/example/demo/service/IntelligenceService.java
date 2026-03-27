@@ -46,10 +46,8 @@ public class IntelligenceService {
 
         // 获取关联的新闻列表
         List<IntelligenceArticle> links = intelligenceArticleRepository
-                .findByIntelligenceIdOrderByIsPrimaryDesc();
-        List<IntelligenceArticle> myLinks = links.stream()
-                .filter(l -> l.getIntelligenceId().equals(id))
-                .toList();
+                .findByIntelligenceIdOrderByIsPrimaryDesc(id);
+        List<IntelligenceArticle> myLinks = links;
 
         List<Long> articleIds = myLinks.stream()
                 .map(IntelligenceArticle::getArticleId).toList();

@@ -116,10 +116,8 @@ public class EventClusterService {
     /** 更新情报的聚合元数据 */
     private void updateIntelligenceMetadata(Intelligence intel) {
         List<IntelligenceArticle> links = intelligenceArticleRepository
-                .findByIntelligenceIdOrderByIsPrimaryDesc();
-        List<IntelligenceArticle> myLinks = links.stream()
-                .filter(l -> l.getIntelligenceId().equals(intel.getId()))
-                .toList();
+                .findByIntelligenceIdOrderByIsPrimaryDesc(intel.getId());
+        List<IntelligenceArticle> myLinks = links;
 
         List<Long> articleIds = myLinks.stream().map(IntelligenceArticle::getArticleId).toList();
         List<NewsArticle> articles = newsArticleRepository.findAllById(articleIds);

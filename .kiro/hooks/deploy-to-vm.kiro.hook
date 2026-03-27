@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Deploy to VM",
+  "description": "Build the project, upload jar to 10.69.25.76, stop old process, and start new one.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "./deploy.sh",
+    "timeout": 300
+  }
+}
