@@ -42,7 +42,13 @@ embedding:
   api-key: sk-4N0tr8LQDwpHoQM5zu9SQl84kPBl3aLTz3HuMBu6MtQ
   model: Qwen-text-embedding-v4
 
-# 数据采集配置
+# Data collection config
 collector:
   market:
-    licence: ${MAIRUI_LICENCE:}
+    licence: ${MAIRUI_LICENCE:68FCE424-DC26-4D68-AC7C-0A22D4C72DA4}
+  tianapi:
+    key: ${TIANAPI_KEY:1ac58e399382bf273fe31065d1a83c36}
+  newsapi:
+    key: ${NEWSAPI_KEY:10adcaec529e47aaab265a9a9b9ff973}
+  tushare:
+    token: ${TUSHARE_TOKEN:b1636f1270dd7dfcf2a929dc0cb5b98265c0eb720bab2bf978d13685}

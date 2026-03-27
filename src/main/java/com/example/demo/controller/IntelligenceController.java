@@ -131,6 +131,26 @@ public class IntelligenceController {
             }).toList();
             data.put("sources", sources);
 
+            // 相关情报（内嵌返回，不需要单独请求）
+            var allRecent = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
+                            java.time.LocalDateTime.now().minusHours(72));
+            var related = allRecent.stream()
+                    .filter(i -> !i.getId().equals(id))
+                    .limit(5)
+                    .map(i -> {
+                        Map<String, Object> ri = new LinkedHashMap<>();
+                        ri.put("id", i.getId());
+                        ri.put("title", i.getTitle());
+                        ri.put("summary", i.getSummary());
+                        ri.put("primarySource", i.getPrimarySource());
+                        ri.put("sourceCount", i.getSourceCount());
+                        ri.put("credibilityScore", i.getCredibilityScore());
+                        ri.put("latestArticleTime", i.getLatestArticleTime());
+                        return ri;
+                    }).toList();
+            data.put("relatedIntelligences", related);
+
             return ResponseEntity.ok(Map.of("code", 200, "data", data));
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(404).body(Map.of(
