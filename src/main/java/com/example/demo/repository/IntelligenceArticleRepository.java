@@ -10,4 +10,6 @@ public interface IntelligenceArticleRepository extends JpaRepository<Intelligenc
     List<IntelligenceArticle> findByIntelligenceIdOrderByIsPrimaryDesc(Long intelligenceId);
 
     boolean existsByArticleId(Long articleId);
+
+    List<IntelligenceArticle> findByArticleId(Long articleId);
 }

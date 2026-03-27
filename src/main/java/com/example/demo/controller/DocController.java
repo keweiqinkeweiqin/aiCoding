@@ -27,6 +27,11 @@ public class DocController {
         return readDoc(".kiro/specs/wall-street-eye/api-doc.md");
     }
 
+    @GetMapping(value = "/api-v3", produces = MediaType.TEXT_PLAIN_VALUE + ";charset=UTF-8")
+    public ResponseEntity<String> apiV3() throws IOException {
+        return readDoc(".kiro/specs/wall-street-eye/api-doc-v3.md");
+    }
+
     private ResponseEntity<String> readDoc(String relativePath) throws IOException {
         Path file = Path.of(relativePath);
         if (Files.exists(file)) {

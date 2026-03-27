@@ -58,6 +58,7 @@
                 <select id="docSelect">
                     <option value="frontend">前端对接文档</option>
                     <option value="spec">完整 API Spec</option>
+                    <option value="v3">API 对接文档 V3</option>
                 </select>
             </div>
             <div id="toc"></div>
@@ -72,7 +73,8 @@
     <script>
         const docs = {
             frontend: `/docs/api-frontend`,
-            spec: `/docs/api-spec`
+            spec: `/docs/api-spec`,
+            v3: `/docs/api-v3`
         };
 
         const tocEl = document.getElementById('toc');
