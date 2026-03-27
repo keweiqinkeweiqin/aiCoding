@@ -38,10 +38,10 @@ public class Intelligence {
 
     private Double sentimentScore;
 
-    @Column(length = 500)
+    @Column(length = 2000)
     private String relatedStocks;
 
-    @Column(length = 500)
+    @Column(length = 2000)
     private String tags;
 
     private Long titleSimhash;

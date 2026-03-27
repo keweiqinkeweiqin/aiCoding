@@ -288,7 +288,7 @@ public class EventClusterService {
 
     private String mergeField(List<NewsArticle> articles,
                               java.util.function.Function<NewsArticle, String> getter) {
-        return articles.stream()
+        String result = articles.stream()
                 .map(getter)
                 .filter(s -> s != null && !s.isBlank())
                 .flatMap(s -> Arrays.stream(s.split(",")))
@@ -296,6 +296,8 @@ public class EventClusterService {
                 .filter(s -> !s.isEmpty())
                 .distinct()
                 .collect(Collectors.joining(","));
+        // Truncate to 1900 chars to stay within column limit
+        return result.length() > 1900 ? result.substring(0, 1900) : result;
     }
 
     static String computePriority(Double credibilityScore, int sourceCount) {
