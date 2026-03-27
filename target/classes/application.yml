@@ -42,7 +42,9 @@ embedding:
   api-key: sk-4N0tr8LQDwpHoQM5zu9SQl84kPBl3aLTz3HuMBu6MtQ
   model: Qwen-text-embedding-v4
 
-# 数据采集配置
+# Data collection config
 collector:
   market:
     licence: ${MAIRUI_LICENCE:}
+  tianapi:
+    key: ${TIANAPI_KEY:1ac58e399382bf273fe31065d1a83c36}

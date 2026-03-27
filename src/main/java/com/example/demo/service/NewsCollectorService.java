@@ -27,6 +27,7 @@ public class NewsCollectorService {
     private final CredibilityService credibilityService;
     private final EventClusterService eventClusterService;
     private final ChatClient chatClient;
+    private final com.example.demo.collector.TianApiCollector tianApiCollector;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final List<SourceConfig> RSS_SOURCES = List.of(
@@ -48,7 +49,8 @@ public class NewsCollectorService {
     public NewsCollectorService(RssCollector rssCollector, DeduplicationService deduplicationService,
             NewsArticleRepository newsArticleRepository, EmbeddingClient embeddingClient,
             VectorSearchService vectorSearchService, CredibilityService credibilityService,
-            EventClusterService eventClusterService, ChatClient.Builder chatClientBuilder) {
+            EventClusterService eventClusterService, ChatClient.Builder chatClientBuilder,
+            com.example.demo.collector.TianApiCollector tianApiCollector) {
         this.rssCollector = rssCollector;
         this.deduplicationService = deduplicationService;
         this.newsArticleRepository = newsArticleRepository;
@@ -57,6 +59,7 @@ public class NewsCollectorService {
         this.credibilityService = credibilityService;
         this.eventClusterService = eventClusterService;
         this.chatClient = chatClientBuilder.build();
+        this.tianApiCollector = tianApiCollector;
     }
 
     public CollectResult collectAll() {
@@ -109,6 +112,37 @@ public class NewsCollectorService {
             } catch (Exception e) { log.error("Source {} fail: {}", source.name, e.getMessage()); }
             sourceResults.add(new SourceResult(source.name, srcCollected, srcDedup, srcStored));
         }
+        // TianAPI finance news
+        try {
+            var tianItems = tianApiCollector.collect();
+            int tianStored = 0;
+            for (var item : tianItems) {
+                String plain = stripHtml(item.content());
+                String dup = deduplicationService.checkDuplicate(item.title(), item.link(), plain);
+                if (dup != null) { totalDeduplicated++; continue; }
+                NewsArticle a = new NewsArticle();
+                a.setTitle(item.title()); a.setContent(plain); a.setSourceUrl(item.link());
+                a.setSourceName("天聚数据"); a.setSourceType("api");
+                a.setCredibilityLevel("normal");
+                a.setContentHash(deduplicationService.computeContentHash(plain));
+                a.setSummary(plain.length() > 100 ? plain.substring(0, 100) + "..." : plain);
+                newsArticleRepository.save(a);
+                try {
+                    float[] vec = embeddingClient.embed(a.getTitle());
+                    if (vec.length > 0) {
+                        java.util.List<Float> fl = new java.util.ArrayList<>();
+                        for (float v : vec) fl.add(v);
+                        a.setEmbeddingJson(objectMapper.writeValueAsString(fl));
+                        newsArticleRepository.save(a);
+                        vectorSearchService.addVector(a.getId(), vec);
+                    }
+                } catch (Exception e) { /* skip */ }
+                totalStored++; tianStored++;
+            }
+            totalCollected += tianItems.size();
+            sourceResults.add(new SourceResult("天聚数据", tianItems.size(), tianItems.size() - tianStored, tianStored));
+        } catch (Exception e) { log.warn("TianAPI failed: {}", e.getMessage()); }
+
         assessCredibilityForRecent();
         try {
             var cr = eventClusterService.clusterRecent();
