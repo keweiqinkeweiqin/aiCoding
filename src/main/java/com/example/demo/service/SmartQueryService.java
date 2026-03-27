@@ -103,7 +103,7 @@ public class SmartQueryService {
     }
 
     /** 使用 Qwen3.5-flash 做问答（快） */
-    private String callLlm(String systemPrompt, String userPrompt) {
+    private String callLlm(String systemPrompt, String userPrompt) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);

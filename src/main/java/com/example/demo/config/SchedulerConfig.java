@@ -23,8 +23,8 @@ public class SchedulerConfig {
         this.marketDataCollector = marketDataCollector;
     }
 
-    /** 新闻采集 - 每30分钟 */
-    @Scheduled(fixedRate = 1800000, initialDelay = 5000)
+    /** 新闻采集 - 每15分钟 */
+    @Scheduled(fixedRate = 900000, initialDelay = 5000)
     public void collectNews() {
         log.info("定时任务: 开始采集新闻...");
         newsCollectorService.collectAll();
