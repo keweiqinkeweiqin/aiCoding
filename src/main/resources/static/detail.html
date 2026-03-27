@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>情报详情 — 华尔街之眼</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;background:#f5f7fa;color:#1a1a2e;min-height:100vh}
+.header{background:#fff;padding:12px 16px;border-bottom:1px solid #e8ecf1;display:flex;align-items:center;position:sticky;top:0;z-index:10}
+.header .back{font-size:20px;cursor:pointer;margin-right:12px;color:#1A73E8;text-decoration:none}
+.header h1{font-size:16px;font-weight:600;color:#333;flex:1}
+.container{max-width:640px;margin:0 auto;padding:16px}
+
+/* 情报头部 */
+.intel-header{background:#fff;border-radius:12px;padding:20px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.intel-meta{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.tag-high{background:#fee;color:#d32f2f}
+.tag-medium{background:#fff3e0;color:#e65100}
+.tag-low{background:#e8f5e9;color:#2e7d32}
+.tag-auth{background:#e3f2fd;color:#1565c0}
+.tag-normal{background:#fff8e1;color:#f57f17}
+.tag-quest{background:#fce4ec;color:#c62828}
+.intel-title{font-size:18px;font-weight:700;line-height:1.4;margin-bottom:8px;color:#1a1a2e}
+.intel-time{font-size:12px;color:#999;display:flex;gap:12px;align-items:center}
+.source-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#666}
+.confidence{font-size:12px;color:#1A73E8;font-weight:600}
+
+/* 正文 */
+.intel-content{background:#fff;border-radius:12px;padding:20px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);line-height:1.8;font-size:14px;color:#333}
+.intel-content p{margin-bottom:12px}
+
+/* 信息来源 */
+.sources-section{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.section-title{font-size:15px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.source-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.source-item:last-child{border-bottom:none}
+.source-name{font-size:13px;color:#333}
+.source-link{font-size:12px;color:#1A73E8;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="header">
+  <a class="back" onclick="history.back()">←</a>
+  <h1>情报详情</h1>
+</div>
+<div class="container">
+  <div id="intelHeader" class="intel-header"><div style="color:#999;font-size:14px">加载中...</div></div>
+  <div id="sourcesSection" class="sources-section" style="display:none"></div>
+  <div id="intelContent" class="intel-content" style="display:none"></div>
+  <div id="profileCard"></div>
+  <div id="analysisSection"></div>
+  <div id="relatedSection"></div>
+</div>
+<style>
+/* 用户画像卡片 */
+.profile-card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1.5px dashed #1A73E8}
+.profile-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.profile-header span{font-size:14px;font-weight:600;color:#1A73E8}
+.profile-header a{font-size:12px;color:#1A73E8;text-decoration:none}
+.profile-row{display:flex;gap:8px;margin-bottom:6px;font-size:13px;color:#555;align-items:center;flex-wrap:wrap}
+.profile-label{color:#999;min-width:56px}
+.profile-tag{background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:12px;font-size:12px}
+
+/* AI 研判区域 */
+.analysis-area{background:#fff;border-radius:12px;padding:20px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.generate-btn{width:100%;padding:14px;background:#1A73E8;color:#fff;border:none;border-radius:10px;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity .2s}
+.generate-btn:hover{opacity:.9}
+.generate-btn:disabled{opacity:.5;cursor:not-allowed}
+.analysis-text{font-size:14px;line-height:1.7;color:#333;margin-bottom:16px}
+
+/* 影响分析卡片 */
+.impact-card{background:#f8f9fb;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid #ccc}
+.impact-card.level-high{border-left-color:#d32f2f}
+.impact-card.level-medium{border-left-color:#e65100}
+.impact-card.level-positive{border-left-color:#2e7d32}
+.impact-level{font-size:12px;font-weight:700;padding:2px 8px;border-radius:4px;display:inline-block;margin-bottom:6px}
+.impact-level.high{background:#fee;color:#d32f2f}
+.impact-level.medium{background:#fff3e0;color:#e65100}
+.impact-level.positive{background:#e8f5e9;color:#2e7d32}
+.impact-stock{font-size:15px;font-weight:700;margin-bottom:8px}
+.impact-detail{font-size:13px;color:#555;line-height:1.6}
+.impact-detail li{margin-bottom:4px}
+
+/* 操作建议 */
+.suggestion-box{background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:10px;padding:16px;margin-bottom:12px}
+.suggestion-title{font-size:14px;font-weight:700;color:#2e7d32;margin-bottom:8px}
+.suggestion-text{font-size:13px;line-height:1.7;color:#333}
+.risks-list{margin-top:10px}
+.risk-item{font-size:13px;color:#d32f2f;margin-bottom:4px;padding-left:12px;position:relative}
+.risk-item::before{content:"⚠";position:absolute;left:0;font-size:11px}
+.user-context{font-size:12px;color:#999;margin-top:8px;font-style:italic}
+
+/* 相关情报 */
+.related-section{background:#fff;border-radius:12px;padding:16px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.related-item{padding:10px 0;border-bottom:1px solid #f0f0f0;cursor:pointer}
+.related-item:last-child{border-bottom:none}
+.related-item:hover{background:#f8f9fb}
+.related-title{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:4px}
+.related-meta{font-size:12px;color:#999;display:flex;gap:8px}
+
+.loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-msg{color:#d32f2f;font-size:13px;padding:8px;background:#fee;border-radius:6px;margin-top:8px}
+</style>
+<script>
+const token = localStorage.getItem('token');
+const userId = localStorage.getItem('userId');
+const params = new URLSearchParams(location.search);
+const intelId = params.get('id');
+
+if (!token) { location.href = '/login.html'; }
+if (!intelId) { document.getElementById('intelHeader').innerHTML = '<div style="color:#d32f2f">缺少情报ID参数</div>'; }
+
+const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+// Parallel load
+Promise.all([
+  fetch('/api/intelligences/' + intelId, { headers }).then(r => r.json()),
+  fetch('/api/profile', { headers }).then(r => r.json()).catch(() => null),
+  fetch('/api/intelligences/' + intelId + '/related?limit=5', { headers }).then(r => r.json()).catch(() => ({data:[]}))
+]).then(([intelRes, profileRes, relatedRes]) => {
+  const intel = intelRes.data || intelRes;
+  renderIntelHeader(intel);
+  renderSources(intel.sources || []);
+  renderContent(intel.content);
+  renderProfile(profileRes);
+  renderAnalysisArea();
+  renderRelated((relatedRes.data || relatedRes || []));
+});
+
+function renderIntelHeader(d) {
+  const priorityClass = d.priority === 'high' ? 'tag-high' : d.priority === 'medium' ? 'tag-medium' : 'tag-low';
+  const priorityText = d.priority === 'high' ? '重要' : d.priority === 'medium' ? '关注' : '一般';
+  const credClass = d.credibilityLevel === 'authoritative' ? 'tag-auth' : d.credibilityLevel === 'normal' ? 'tag-normal' : 'tag-quest';
+  const credText = d.credibilityLevel === 'authoritative' ? '权威' : d.credibilityLevel === 'normal' ? '可信' : '存疑';
+  const tags = (d.tags || '').split(',').filter(Boolean).map(t => `<span class="tag tag-auth">${t.trim()}</span>`).join('');
+  const score = d.credibilityScore ? Math.round(d.credibilityScore * 100) + '%' : '';
+  const time = d.latestArticleTime ? new Date(d.latestArticleTime).toLocaleString('zh-CN') : '';
+  document.getElementById('intelHeader').innerHTML = `
+    <div class="intel-meta">
+      <span class="tag ${priorityClass}">${priorityText}</span>
+      <span class="tag ${credClass}">${credText}</span>
+      ${tags}
+    </div>
+    <div class="intel-title">${d.title || ''}</div>
+    <div class="intel-time">
+      <span class="source-badge">📰 ${d.primarySource || ''}</span>
+      <span class="confidence">置信度 ${score}</span>
+      ${d.sourceCount ? `<span>${d.sourceCount}个来源交叉验证</span>` : ''}
+      <span>${d.readTime || ''}</span>
+      <span>${time}</span>
+    </div>`;
+}
+
+function renderSources(sources) {
+  if (!sources || !sources.length) return;
+  const el = document.getElementById('sourcesSection');
+  el.style.display = 'block';
+  el.innerHTML = `<div class="section-title">📋 信息来源</div>` +
+    sources.map(s => `<div class="source-item">
+      <div><span class="tag ${s.credibilityTag==='权威'?'tag-auth':s.credibilityTag==='可信'?'tag-normal':'tag-quest'}">${s.credibilityTag}</span>
+      <span class="source-name">${s.sourceName} — ${s.title||''}</span></div>
+      ${s.sourceUrl ? `<a class="source-link" href="${s.sourceUrl}" target="_blank">查看原文 →</a>` : ''}
+    </div>`).join('');
+}
+
+function renderContent(content) {
+  if (!content) return;
+  const el = document.getElementById('intelContent');
+  el.style.display = 'block';
+  el.innerHTML = content.split('\n').map(p => p.trim() ? `<p>${p}</p>` : '').join('');
+}
+</script>
+<script>
+function renderProfile(data) {
+  if (!data) return;
+  const p = data.profile || data;
+  const holdings = data.holdings || [];
+  const focusAreas = (p.focusAreas || '').split(',').filter(Boolean);
+  const holdingTags = holdings.map(h => h.stockCode + (h.stockName ? ` (${h.stockName})` : '')).join('、') || '暂无';
+  const investorType = p.investorType || p.investmentStyle || '未设置';
+  document.getElementById('profileCard').innerHTML = `
+    <div class="profile-card">
+      <div class="profile-header"><span>🧑‍💼 你的投资画像</span><a href="/profile.html">修改 →</a></div>
+      <div class="profile-row"><span class="profile-label">关注领域</span>${focusAreas.map(a=>`<span class="profile-tag">${a.trim()}</span>`).join('')||'<span style="color:#999">未设置</span>'}</div>
+      <div class="profile-row"><span class="profile-label">持仓标的</span><span>${holdingTags}</span></div>
+      <div class="profile-row"><span class="profile-label">风险偏好</span><span>${investorType}</span></div>
+    </div>`;
+}
+
+function renderAnalysisArea() {
+  document.getElementById('analysisSection').innerHTML = `
+    <div class="analysis-area" id="analysisArea">
+      <div class="section-title">🤖 针对你的个性化分析</div>
+      <div id="analysisResult"></div>
+      <button class="generate-btn" id="generateBtn" onclick="generateAnalysis()">
+        📊 生成完整报告
+      </button>
+      <div id="analysisError"></div>
+    </div>`;
+}
+
+function generateAnalysis() {
+  const btn = document.getElementById('generateBtn');
+  const resultEl = document.getElementById('analysisResult');
+  const errorEl = document.getElementById('analysisError');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> AI 分析中...';
+  errorEl.innerHTML = '';
+  resultEl.innerHTML = '';
+
+  fetch('/api/analysis/generate', {
+    method: 'POST', headers,
+    body: JSON.stringify({ userId: Number(userId), articleId: Number(intelId) })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) throw new Error(data.error);
+    renderAnalysisResult(data);
+    btn.innerHTML = '📊 重新生成报告';
+    btn.disabled = false;
+  })
+  .catch(err => {
+    errorEl.innerHTML = `<div class="error-msg">生成失败：${err.message}</div>`;
+    btn.innerHTML = '📊 生成完整报告';
+    btn.disabled = false;
+  });
+}
+
+function renderAnalysisResult(data) {
+  const el = document.getElementById('analysisResult');
+  let html = '';
+
+  // Analysis text
+  if (data.analysis) {
+    html += `<div class="analysis-text">${data.analysis}</div>`;
+  }
+
+  // Impact cards
+  if (data.impacts && data.impacts.length) {
+    html += data.impacts.map(imp => {
+      const levelClass = imp.level === '重大影响' ? 'high' : imp.level === '中等影响' ? 'medium' : 'positive';
+      const cardClass = imp.level === '重大影响' ? 'level-high' : imp.level === '中等影响' ? 'level-medium' : 'level-positive';
+      return `<div class="impact-card ${cardClass}">
+        <span class="impact-level ${levelClass}">${imp.level || '影响分析'}</span>
+        <div class="impact-stock">${imp.stock || ''}</div>
+        <div class="impact-detail">
+          <ul>
+            ${imp.impact ? `<li>${imp.impact}</li>` : ''}
+            ${imp.volatility ? `<li>预计波动：${imp.volatility}</li>` : ''}
+            ${imp.revenueImpact ? `<li>营收影响：${imp.revenueImpact}</li>` : ''}
+            ${imp.longTermImpact ? `<li>长期影响：${imp.longTermImpact}</li>` : ''}
+          </ul>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Suggestion
+  if (data.suggestion) {
+    html += `<div class="suggestion-box">
+      <div class="suggestion-title">📍 操作建议</div>
+      <div class="suggestion-text">${data.suggestion}</div>
+      ${data.risks && data.risks.length ? `<div class="risks-list">${data.risks.map(r=>`<div class="risk-item">${r}</div>`).join('')}</div>` : ''}
+      ${data.userContext ? `<div class="user-context">${data.userContext}</div>` : ''}
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderRelated(items) {
+  if (!items || !items.length) return;
+  document.getElementById('relatedSection').innerHTML = `
+    <div class="related-section">
+      <div class="section-title">📎 相关情报</div>
+      ${items.map(i => `<div class="related-item" onclick="location.href='/detail.html?id=${i.id}'">
+        <div class="related-title">${i.title || ''}</div>
+        <div class="related-meta">
+          <span>${i.primarySource || ''}</span>
+          <span class="tag ${i.credibilityLevel==='authoritative'?'tag-auth':i.credibilityLevel==='normal'?'tag-normal':'tag-quest'}">${i.credibilityLevel==='authoritative'?'权威':i.credibilityLevel==='normal'?'可信':'存疑'}</span>
+        </div>
+      </div>`).join('')}
+    </div>`;
+}
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.Intelligence;
+import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.service.EventClusterService;
 import com.example.demo.service.IntelligenceService;
 import org.springframework.data.domain.Page;
@@ -8,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -17,11 +19,14 @@ public class IntelligenceController {
 
     private final IntelligenceService intelligenceService;
     private final EventClusterService eventClusterService;
+    private final IntelligenceRepository intelligenceRepository;
 
     public IntelligenceController(IntelligenceService intelligenceService,
-                                  EventClusterService eventClusterService) {
+                                  EventClusterService eventClusterService,
+                                  IntelligenceRepository intelligenceRepository) {
         this.intelligenceService = intelligenceService;
         this.eventClusterService = eventClusterService;
+        this.intelligenceRepository = intelligenceRepository;
     }
 
     /** 情报列表（分页） */
@@ -103,6 +108,37 @@ public class IntelligenceController {
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(404).body(Map.of(
                     "code", 404, "message", e.getMessage()));
+        }
+    }
+
+    /** 相关情报推荐 */
+    @GetMapping("/{id}/related")
+    public ResponseEntity<?> related(@PathVariable Long id,
+                                     @RequestParam(defaultValue = "5") int limit) {
+        try {
+            var detail = intelligenceService.getDetail(id);
+            var intel = detail.intelligence();
+            // Simple: return recent intelligences excluding self, sorted by time
+            var all = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
+                            java.time.LocalDateTime.now().minusHours(72));
+            var related = all.stream()
+                    .filter(i -> !i.getId().equals(id))
+                    .limit(limit)
+                    .map(i -> {
+                        Map<String, Object> item = new java.util.LinkedHashMap<>();
+                        item.put("id", i.getId());
+                        item.put("title", i.getTitle());
+                        item.put("summary", i.getSummary());
+                        item.put("primarySource", i.getPrimarySource());
+                        item.put("credibilityLevel", i.getCredibilityLevel());
+                        item.put("tags", i.getTags());
+                        item.put("latestArticleTime", i.getLatestArticleTime());
+                        return item;
+                    }).toList();
+            return ResponseEntity.ok(Map.of("code", 200, "data", related));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.ok(Map.of("code", 200, "data", List.of()));
         }
     }
 
