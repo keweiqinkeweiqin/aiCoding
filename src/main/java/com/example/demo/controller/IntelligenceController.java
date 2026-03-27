@@ -4,8 +4,11 @@ import com.example.demo.model.Intelligence;
 import com.example.demo.model.UserProfile;
 import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.repository.UserProfileRepository;
+import com.example.demo.service.AnalysisService;
 import com.example.demo.service.EventClusterService;
 import com.example.demo.service.IntelligenceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,19 +19,24 @@ import java.util.*;
 @RequestMapping("/api/intelligences")
 public class IntelligenceController {
 
+    private static final Logger log = LoggerFactory.getLogger(IntelligenceController.class);
+
     private final IntelligenceService intelligenceService;
     private final EventClusterService eventClusterService;
     private final IntelligenceRepository intelligenceRepository;
     private final UserProfileRepository userProfileRepository;
+    private final AnalysisService analysisService;
 
     public IntelligenceController(IntelligenceService intelligenceService,
                                   EventClusterService eventClusterService,
                                   IntelligenceRepository intelligenceRepository,
-                                  UserProfileRepository userProfileRepository) {
+                                  UserProfileRepository userProfileRepository,
+                                  AnalysisService analysisService) {
         this.intelligenceService = intelligenceService;
         this.eventClusterService = eventClusterService;
         this.intelligenceRepository = intelligenceRepository;
         this.userProfileRepository = userProfileRepository;
+        this.analysisService = analysisService;
     }
 
     /** Intelligence list with personalized sorting based on user profile */
@@ -95,9 +103,11 @@ public class IntelligenceController {
         ));
     }
 
-    /** 情报详情 */
+    /** 情报详情（含个性化分析） */
     @GetMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> detail(@PathVariable Long id) {
+    public ResponseEntity<Map<String, Object>> detail(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
         try {
             var detail = intelligenceService.getDetail(id);
             var intel = detail.intelligence();
@@ -150,6 +160,19 @@ public class IntelligenceController {
                         return ri;
                     }).toList();
             data.put("relatedIntelligences", related);
+
+            // 个性化影响分析 + 操作建议（有用户画像时调 LLM 生成）
+            if (userId > 0) {
+                try {
+                    Map<String, Object> analysis = analysisService.generateAnalysis(userId, id);
+                    data.put("personalizedAnalysis", analysis);
+                } catch (Exception e) {
+                    log.warn("Analysis generation failed for intel {}: {}", id, e.getMessage());
+                    data.put("personalizedAnalysis", null);
+                }
+            } else {
+                data.put("personalizedAnalysis", null);
+            }
 
             return ResponseEntity.ok(Map.of("code", 200, "data", data));
         } catch (NoSuchElementException e) {
