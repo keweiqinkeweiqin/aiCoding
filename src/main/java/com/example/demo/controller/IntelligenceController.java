@@ -161,15 +161,42 @@ public class IntelligenceController {
                     }).toList();
             data.put("relatedIntelligences", related);
 
-            // 个性化影响分析 + 操作建议（有用户画像时调 LLM 生成）
+            // 个性化影响分析（画像 + 个股影响 + 操作建议）
             if (userId > 0) {
+                Map<String, Object> personalized = new LinkedHashMap<>();
+
+                // 1. 用户画像卡片
+                UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
+                if (profile != null) {
+                    Map<String, Object> profileCard = new LinkedHashMap<>();
+                    profileCard.put("investorType", profile.getInvestorType());
+                    profileCard.put("investmentCycle", profile.getInvestmentCycle());
+                    profileCard.put("focusAreas", profile.getFocusAreas() != null
+                            ? List.of(profile.getFocusAreas().split(",")) : List.of());
+                    profileCard.put("holdings", profile.getHoldings() != null
+                            ? List.of(profile.getHoldings().split(",")) : List.of());
+                    personalized.put("userProfile", profileCard);
+                } else {
+                    personalized.put("userProfile", null);
+                }
+
+                // 2. LLM 生成的个股影响 + 操作建议
                 try {
                     Map<String, Object> analysis = analysisService.generateAnalysis(userId, id);
-                    data.put("personalizedAnalysis", analysis);
+                    personalized.put("analysis", analysis.get("analysis"));
+                    personalized.put("impacts", analysis.get("impacts"));
+                    personalized.put("suggestion", analysis.get("suggestion"));
+                    personalized.put("risks", analysis.get("risks"));
+                    personalized.put("userContext", analysis.get("userContext"));
                 } catch (Exception e) {
-                    log.warn("Analysis generation failed for intel {}: {}", id, e.getMessage());
-                    data.put("personalizedAnalysis", null);
+                    log.warn("Analysis failed for intel {}: {}", id, e.getMessage());
+                    personalized.put("analysis", null);
+                    personalized.put("impacts", List.of());
+                    personalized.put("suggestion", null);
+                    personalized.put("risks", List.of());
                 }
+
+                data.put("personalizedAnalysis", personalized);
             } else {
                 data.put("personalizedAnalysis", null);
             }
