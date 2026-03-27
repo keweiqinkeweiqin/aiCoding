@@ -51,11 +51,11 @@ public class AuthController {
         user.setPhone(phone);
         user.setNickname(body.getOrDefault("nickname", "user_" + phone.substring(phone.length() - 4)));
         user.setLastLoginAt(LocalDateTime.now());
-        userRepository.save(user);
+        User saved = userRepository.save(user);
         return ResponseEntity.ok(Map.of("code", 200, "data", Map.of(
-                "userId", user.getId(),
-                "phone", user.getPhone(),
-                "nickname", user.getNickname(),
+                "userId", saved.getId(),
+                "phone", saved.getPhone(),
+                "nickname", saved.getNickname() != null ? saved.getNickname() : "",
                 "isNew", true)));
     }
 
