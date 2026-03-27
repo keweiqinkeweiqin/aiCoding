@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "calicat": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "https://www.calicat.cn/mcp"
+      ],
+      "autoApprove": [
+        "get_meta_data"
+      ]
+    }
+  }
+}
