@@ -27,17 +27,33 @@ public class MarketDataCollector {
     @Value("${collector.market.licence:}")
     private String licence;
 
-    // AI概念股
-    private static final Map<String, String> AI_STOCKS = Map.of(
-            "002230", "科大讯飞",
-            "300496", "中科创达",
-            "688111", "金山办公",
-            "300033", "同花顺",
-            "002415", "海康威视",
-            "603019", "中科曙光",
-            "688256", "寒武纪",
-            "688041", "海光信息"
-    );
+    // AI + 科技概念股（扩充版）
+    private static final Map<String, String> AI_STOCKS = new java.util.LinkedHashMap<>() {{
+        // AI 核心
+        put("002230", "科大讯飞");
+        put("688256", "寒武纪");
+        put("688041", "海光信息");
+        put("603019", "中科曙光");
+        put("688111", "金山办公");
+        put("300496", "中科创达");
+        put("300033", "同花顺");
+        // 算力/芯片
+        put("688981", "中芯国际");
+        put("002049", "紫光国微");
+        put("688008", "澜起科技");
+        put("603501", "韦尔股份");
+        // 安防/机器人
+        put("002415", "海康威视");
+        put("002236", "大华股份");
+        put("300124", "汇川技术");
+        // 互联网/云计算
+        put("600941", "中国移动");
+        put("601138", "工业富联");
+        put("688561", "奇安信");
+        // 新能源车智能化
+        put("002594", "比亚迪");
+        put("601127", "赛力斯");
+    }};
 
     public MarketDataCollector(RestTemplate restTemplate, MarketDataRepository marketDataRepository) {
         this.restTemplate = restTemplate;
