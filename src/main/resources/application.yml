@@ -1,22 +1,43 @@
 spring:
   application:
-    name: demo
+    name: wall-street-eye
 
   datasource:
-    url: jdbc:h2:file:./data/demodb
+    url: jdbc:h2:file:./data/wallstreet
     driver-class-name: org.h2.Driver
     username: sa
     password:
 
   h2:
     console:
-      enabled: false
+      enabled: true
+      path: /h2-console
 
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
+
+  # Spring AI - 暂时禁用，等key申请到再开启
+  ai:
+    openai:
+      api-key: ${HUANSHI_API_KEY:sk-placeholder}
+      base-url: https://pre-aibrain-large-model-engine.hellobike.cn
+      chat:
+        enabled: false
+        options:
+          model: Deepseek-V3-0324
+          temperature: 0.3
+      embedding:
+        enabled: false
+        options:
+          model: Doubao-Embedding-large-0515
 
 server:
   port: 8080
+
+# 数据采集配置
+collector:
+  market:
+    licence: ${MAIRUI_LICENCE:}
