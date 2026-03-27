@@ -62,7 +62,7 @@ public class AuthController {
     /** Update nickname */
     @PutMapping("/me")
     public ResponseEntity<Map<String, Object>> updateMe(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId,
+            @RequestParam(defaultValue = "0") Long userId,
             @RequestBody Map<String, String> body) {
         var user = userRepository.findById(userId);
         if (user.isEmpty()) return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));
@@ -75,7 +75,7 @@ public class AuthController {
     /** Get current user */
     @GetMapping("/me")
     public ResponseEntity<Map<String, Object>> me(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
+            @RequestParam(defaultValue = "0") Long userId) {
         if (userId == 0) return ResponseEntity.status(401).body(Map.of("code", 401, "message", "not logged in"));
         var user = userRepository.findById(userId);
         if (user.isEmpty()) return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));

@@ -35,7 +35,7 @@ public class HomeController {
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> home(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
+            @RequestParam(defaultValue = "0") Long userId) {
 
         Map<String, Object> data = new LinkedHashMap<>();
 

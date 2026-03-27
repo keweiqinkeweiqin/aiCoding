@@ -20,7 +20,7 @@ public class ProfileController {
     /** PUT /api/profile/save — 保存完整画像（含持仓） */
     @PutMapping("/save")
     public ResponseEntity<Map<String, Object>> saveProfile(
-            @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId,
+            @RequestParam(defaultValue = "1") Long userId,
             @RequestBody Map<String, Object> body) {
 
         UserProfile profile = userProfileRepository.findByUserId(userId).orElseGet(() -> {

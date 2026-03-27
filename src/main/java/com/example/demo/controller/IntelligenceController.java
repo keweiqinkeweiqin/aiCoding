@@ -45,7 +45,7 @@ public class IntelligenceController {
             @RequestParam(defaultValue = "24") int hours,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
+            @RequestParam(defaultValue = "1") Long userId) {
 
         Page<Intelligence> result = intelligenceService.listIntelligences(hours, page, size);
         List<Intelligence> items = new java.util.ArrayList<>(result.getContent());
@@ -107,7 +107,7 @@ public class IntelligenceController {
     @GetMapping("/{id}")
     public ResponseEntity<Map<String, Object>> detail(
             @PathVariable Long id,
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
+            @RequestParam(defaultValue = "0") Long userId) {
         try {
             var detail = intelligenceService.getDetail(id);
             var intel = detail.intelligence();

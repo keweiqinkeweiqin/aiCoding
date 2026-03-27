@@ -2,17 +2,17 @@
 
 > 基于实际代码实现，2026-03-27 更新
 > Base URL: `http://{host}:8080`
-> 认证方式: Header `X-User-Id: {userId}`（登录后获取）
+> 认证方式: Query param `userId={userId}`（登录后获取）
 
 ## 认证流程
 
 1. 调 `POST /api/auth/login` 传手机号，返回 `userId`
-2. 前端存储 `userId`，后续请求在 Header 中带 `X-User-Id: {userId}`
-3. 不传 `X-User-Id` 的接口也能用，但个性化功能（排序/分析）不生效
+2. 前端存储 `userId`，后续请求在 Header 中带 `userId query param: {userId}`
+3. 不传 `userId` 的接口也能用，但个性化功能（排序/分析）不生效
 
-需要 X-User-Id 的接口汇总：
+需要 userId query param 的接口汇总：
 
-| 接口 | X-User-Id 作用 | 不传时行为 |
+| 接口 | userId query param 作用 | 不传时行为 |
 |------|---------------|-----------|
 | GET /api/home | 读取昵称+画像标签 | 返回 Guest |
 | GET /api/intelligences | 读取画像做个性化排序 | 按时间倒序（不排序） |
@@ -68,7 +68,7 @@ Response (新用户自动注册):
 
 ### 1.2 GET /api/auth/me — 获取当前用户信息
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 
 Response:
 ```json
@@ -84,7 +84,7 @@ Response:
 
 ### 1.3 PUT /api/auth/me — 修改昵称
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 
 Request:
 ```json
@@ -102,7 +102,7 @@ Response:
 
 ### 1B.1 GET /api/home — 首页聚合数据
 
-Header: `X-User-Id: 1`（可选，不传返回 Guest）
+Param: `?userId=1`（可选，不传返回 Guest）
 
 Response:
 ```json
@@ -161,7 +161,7 @@ marketOverview 说明：
 
 ### 2.1 PUT /api/profile/save — 保存完整画像（含持仓）
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 
 Request:
 ```json
@@ -197,7 +197,7 @@ Response:
 
 ### 3.1 GET /api/intelligences — 情报列表（个性化排序）
 
-Header: `X-User-Id: 1`（自动读取画像排序）
+Param: `?userId=1`（自动读取画像排序）
 Params: `?hours=24&page=0&size=20`
 
 Response:
@@ -239,7 +239,7 @@ Response:
 
 ### 3.2 GET /api/intelligences/{id} — 情报详情
 
-Header: `X-User-Id: 1`（可选，传了会返回个性化分析）
+Param: `?userId=1`（可选，传了会返回个性化分析）
 
 Response:
 ```json
@@ -327,7 +327,7 @@ content 生成逻辑：
 - 生成后缓存，下次不重复调用
 
 personalizedAnalysis 说明：
-- 需要传 `X-User-Id` header 且用户有画像才会生成
+- 需要传 `userId` header 且用户有画像才会生成
 - 不传或无画像时返回 `null`
 - 由 LLM 基于用户画像（投资者类型/关注领域/持仓）生成
 - 包含：个股影响分析(impacts) + 操作建议(suggestion) + 风险提示(risks)
@@ -456,7 +456,7 @@ reports 说明：
 
 ### 4.1 POST /api/analysis/generate — 同步生成 AI 研判
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 
 Request:
 ```json
@@ -485,14 +485,14 @@ Response:
 
 ### 4.2 GET /api/analysis/stream — SSE 流式生成
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 Params: `?articleId=1`
 
 返回 SSE 事件流，逐步推送分析结果。
 
 ### 4.3 GET /api/analysis/history — 研判历史
 
-Header: `X-User-Id: 1`
+Param: `?userId=1`
 
 Response:
 ```json

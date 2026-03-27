@@ -409,10 +409,10 @@ async function generateAnalysis() {
   result.innerHTML = '<div class="loading">正在调用AI生成研判分析，请稍候</div>';
 
   try {
-    const r = await fetch(API + '/api/analysis/generate', {
+    const r = await fetch(API + '/api/analysis/generate?userId=' + USER_ID, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...USER_HEADERS },
-      body: JSON.stringify({ articleId })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ articleId, userId: parseInt(USER_ID) })
     });
     if (!r.ok) {
       const err = await r.json();
@@ -482,7 +482,7 @@ async function loadAnalysisHistory() {
   if (!el) return;
   el.innerHTML = '<div class="loading">加载中</div>';
   try {
-    const r = await fetch(API + '/api/analysis/history', { headers: USER_HEADERS });
+    const r = await fetch(API + '/api/analysis/history?userId=' + USER_ID, { headers: {} });
     if (!r.ok) throw new Error('请求失败');
     const records = await r.json();
     if (!records.length) {
@@ -586,7 +586,7 @@ function initProfilePanel() {
 
 async function loadProfile() {
   try {
-    const r = await fetch(API + '/api/profile', { headers: USER_HEADERS });
+    const r = await fetch(API + '/api/profile?userId=' + USER_ID, { headers: {} });
     const d = await r.json();
     profileData = d.data || {};
   } catch (e) {
@@ -656,9 +656,9 @@ async function saveProfile() {
   const holdings = document.getElementById('profileHoldings')?.value || '';
 
   try {
-    const r = await fetch(API + '/api/profile', {
+    const r = await fetch(API + '/api/profile?userId=' + USER_ID, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...USER_HEADERS },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         investorType: profileData.investorType || '',
         investmentCycle: profileData.investmentCycle || '',

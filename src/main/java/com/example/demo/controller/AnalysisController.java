@@ -20,7 +20,7 @@ public class AnalysisController {
 
     @PostMapping("/generate")
     public ResponseEntity<?> generate(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId,
+            @RequestParam(defaultValue = "0") Long userId,
             @RequestBody Map<String, Object> body) {
         if (userId == 0) {
             return ResponseEntity.status(401).body(Map.of("error", "not logged in", "code", 401));
@@ -36,7 +36,7 @@ public class AnalysisController {
 
     @GetMapping("/stream")
     public SseEmitter stream(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId,
+            @RequestParam(defaultValue = "0") Long userId,
             @RequestParam Long articleId) {
         SseEmitter emitter = new SseEmitter(60_000L);
         if (userId == 0) {
@@ -53,7 +53,7 @@ public class AnalysisController {
 
     @GetMapping("/history")
     public ResponseEntity<?> history(
-            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
+            @RequestParam(defaultValue = "0") Long userId) {
         if (userId == 0) {
             return ResponseEntity.status(401).body(Map.of("error", "not logged in", "code", 401));
         }
