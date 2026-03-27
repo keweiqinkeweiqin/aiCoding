@@ -1,17 +1,16 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.Intelligence;
+import com.example.demo.model.UserProfile;
 import com.example.demo.repository.IntelligenceRepository;
+import com.example.demo.repository.UserProfileRepository;
 import com.example.demo.service.EventClusterService;
 import com.example.demo.service.IntelligenceService;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/intelligences")
@@ -20,25 +19,55 @@ public class IntelligenceController {
     private final IntelligenceService intelligenceService;
     private final EventClusterService eventClusterService;
     private final IntelligenceRepository intelligenceRepository;
+    private final UserProfileRepository userProfileRepository;
 
     public IntelligenceController(IntelligenceService intelligenceService,
                                   EventClusterService eventClusterService,
-                                  IntelligenceRepository intelligenceRepository) {
+                                  IntelligenceRepository intelligenceRepository,
+                                  UserProfileRepository userProfileRepository) {
         this.intelligenceService = intelligenceService;
         this.eventClusterService = eventClusterService;
         this.intelligenceRepository = intelligenceRepository;
+        this.userProfileRepository = userProfileRepository;
     }
 
-    /** 情报列表（分页） */
+    /** Intelligence list with personalized sorting based on user profile */
     @GetMapping
     public ResponseEntity<Map<String, Object>> list(
             @RequestParam(defaultValue = "24") int hours,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "1") Long userId,
+            @RequestParam(required = false) String focusAreas,
+            @RequestParam(required = false) String holdings) {
 
         Page<Intelligence> result = intelligenceService.listIntelligences(hours, page, size);
+        List<Intelligence> items = new java.util.ArrayList<>(result.getContent());
 
-        var content = result.getContent().stream().map(intel -> {
+        // Auto-load from user profile if params not provided
+        if (focusAreas == null && holdings == null) {
+            UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
+            if (profile != null) {
+                focusAreas = profile.getFocusAreas();
+                holdings = profile.getHoldings();
+            }
+        }
+
+        // Personalized sorting
+        if ((focusAreas != null && !focusAreas.isBlank()) || (holdings != null && !holdings.isBlank())) {
+            Set<String> areas = focusAreas != null ? Set.of(focusAreas.toLowerCase().split(",")) : Set.of();
+            Set<String> stocks = holdings != null ? Set.of(holdings.toUpperCase().split(",")) : Set.of();
+            items.sort((a, b) -> {
+                int scoreA = calcRelevance(a, areas, stocks);
+                int scoreB = calcRelevance(b, areas, stocks);
+                if (scoreA != scoreB) return Integer.compare(scoreB, scoreA);
+                if (a.getLatestArticleTime() != null && b.getLatestArticleTime() != null)
+                    return b.getLatestArticleTime().compareTo(a.getLatestArticleTime());
+                return 0;
+            });
+        }
+
+        var content = items.stream().map(intel -> {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", intel.getId());
             item.put("priority", intel.getPriority());
@@ -153,5 +182,37 @@ public class IntelligenceController {
                         "merged", result.merged()
                 )
         ));
+    }
+
+    /**
+     * Calculate relevance score for personalized sorting.
+     * Higher score = more relevant to user's focus areas and holdings.
+     */
+    private int calcRelevance(Intelligence intel, Set<String> focusAreas, Set<String> holdings) {
+        int score = 0;
+
+        // Match tags against focus areas (+10 per match)
+        String tags = intel.getTags();
+        if (tags != null && !focusAreas.isEmpty()) {
+            for (String tag : tags.toLowerCase().split(",")) {
+                if (focusAreas.contains(tag.trim())) score += 10;
+            }
+        }
+
+        // Match related stocks against holdings (+20 per match, stocks matter more)
+        String stocks = intel.getRelatedStocks();
+        if (stocks != null && !holdings.isEmpty()) {
+            for (String stock : stocks.toUpperCase().split(",")) {
+                if (holdings.contains(stock.trim())) score += 20;
+            }
+        }
+
+        // Boost high priority
+        if ("high".equals(intel.getPriority())) score += 5;
+
+        // Boost multi-source (more credible)
+        if (intel.getSourceCount() != null && intel.getSourceCount() > 1) score += 3;
+
+        return score;
     }
 }

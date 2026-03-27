@@ -11,18 +11,13 @@ public class UserProfile {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(unique = true)
     private Long userId;
 
-    @Column(length = 20)
-    private String investorType;
-
-    @Column(length = 20)
-    private String investmentCycle;
-
-    @Column(length = 500)
-    private String focusAreas;
-
+    private String investorType;     // conservative / balanced / growth
+    private String investmentCycle;  // short / medium / long
+    private String focusAreas;       // comma-separated: AI,chip,robot
+    private String holdings;         // comma-separated stock codes: NVDA,TSM
     private LocalDateTime updatedAt;
 
     @PrePersist
@@ -31,9 +26,7 @@ public class UserProfile {
     }
 
     @PreUpdate
-    public void preUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
+    public void preUpdate() { this.updatedAt = LocalDateTime.now(); }
 
     public UserProfile() {}
 
@@ -47,6 +40,8 @@ public class UserProfile {
     public void setInvestmentCycle(String investmentCycle) { this.investmentCycle = investmentCycle; }
     public String getFocusAreas() { return focusAreas; }
     public void setFocusAreas(String focusAreas) { this.focusAreas = focusAreas; }
+    public String getHoldings() { return holdings; }
+    public void setHoldings(String holdings) { this.holdings = holdings; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

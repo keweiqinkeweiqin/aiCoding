@@ -1,8 +1,7 @@
 package com.example.demo.controller;
 
-import com.example.demo.model.User;
-import com.example.demo.service.AuthService;
-import com.example.demo.service.ProfileService;
+import com.example.demo.model.UserProfile;
+import com.example.demo.repository.UserProfileRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,91 +11,44 @@ import java.util.Map;
 @RequestMapping("/api/profile")
 public class ProfileController {
 
-    private final ProfileService profileService;
-    private final AuthService authService;
+    private final UserProfileRepository userProfileRepository;
 
-    public ProfileController(ProfileService profileService, AuthService authService) {
-        this.profileService = profileService;
-        this.authService = authService;
+    public ProfileController(UserProfileRepository userProfileRepository) {
+        this.userProfileRepository = userProfileRepository;
     }
 
-    /**
-     * 获取用户画像
-     * GET /api/profile
-     */
+    /** Get profile (use userId=1 as default until auth is implemented) */
     @GetMapping
-    public ResponseEntity<?> getProfile(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        var userOpt = authService.resolveUser(authHeader);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "未登录"));
+    public ResponseEntity<Map<String, Object>> getProfile(
+            @RequestParam(defaultValue = "1") Long userId) {
+        var profile = userProfileRepository.findByUserId(userId).orElse(null);
+        if (profile == null) {
+            return ResponseEntity.ok(Map.of("code", 200, "data", Map.of()));
         }
-        return ResponseEntity.ok(profileService.getProfile(userOpt.get().getId()));
+        return ResponseEntity.ok(Map.of("code", 200, "data", Map.of(
+                "userId", profile.getUserId(),
+                "investorType", profile.getInvestorType() != null ? profile.getInvestorType() : "",
+                "investmentCycle", profile.getInvestmentCycle() != null ? profile.getInvestmentCycle() : "",
+                "focusAreas", profile.getFocusAreas() != null ? profile.getFocusAreas() : "",
+                "holdings", profile.getHoldings() != null ? profile.getHoldings() : ""
+        )));
     }
 
-    /**
-     * 保存用户画像
-     * PUT /api/profile
-     */
+    /** Save or update profile */
     @PutMapping
-    public ResponseEntity<?> saveProfile(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestBody Map<String, Object> body) {
-        var userOpt = authService.resolveUser(authHeader);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "未登录"));
-        }
-        try {
-            return ResponseEntity.ok(profileService.saveProfile(userOpt.get().getId(), body));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "message", e.getMessage()));
-        }
-    }
-
-    /**
-     * 添加持仓
-     * POST /api/profile/holdings
-     */
-    @PostMapping("/holdings")
-    public ResponseEntity<?> addHolding(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestBody Map<String, Object> body) {
-        var userOpt = authService.resolveUser(authHeader);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "未登录"));
-        }
-        try {
-            return ResponseEntity.ok(profileService.addHolding(userOpt.get().getId(), body));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "message", e.getMessage()));
-        }
-    }
-
-    /**
-     * 删除持仓
-     * DELETE /api/profile/holdings/{stockCode}
-     */
-    @DeleteMapping("/holdings/{stockCode}")
-    public ResponseEntity<?> removeHolding(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @PathVariable String stockCode) {
-        var userOpt = authService.resolveUser(authHeader);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "未登录"));
-        }
-        return ResponseEntity.ok(profileService.removeHolding(userOpt.get().getId(), stockCode));
-    }
-
-    /**
-     * 获取可选关注领域
-     * GET /api/profile/focus-options
-     */
-    @GetMapping("/focus-options")
-    public ResponseEntity<?> getFocusOptions(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
-        var userOpt = authService.resolveUser(authHeader);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "未登录"));
-        }
-        return ResponseEntity.ok(profileService.getFocusOptions(userOpt.get().getId()));
+    public ResponseEntity<Map<String, Object>> saveProfile(
+            @RequestParam(defaultValue = "1") Long userId,
+            @RequestBody Map<String, String> body) {
+        var profile = userProfileRepository.findByUserId(userId).orElseGet(() -> {
+            UserProfile p = new UserProfile();
+            p.setUserId(userId);
+            return p;
+        });
+        if (body.containsKey("investorType")) profile.setInvestorType(body.get("investorType"));
+        if (body.containsKey("investmentCycle")) profile.setInvestmentCycle(body.get("investmentCycle"));
+        if (body.containsKey("focusAreas")) profile.setFocusAreas(body.get("focusAreas"));
+        if (body.containsKey("holdings")) profile.setHoldings(body.get("holdings"));
+        userProfileRepository.save(profile);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "saved"));
     }
 }
