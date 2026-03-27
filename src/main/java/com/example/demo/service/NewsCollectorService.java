@@ -30,7 +30,10 @@ public class NewsCollectorService {
     private static final List<SourceConfig> RSS_SOURCES = List.of(
             new SourceConfig("https://rsshub.chn.moe/36kr/information/web_news", "36Kr", "rss", "normal"),
             new SourceConfig("https://rsshub.chn.moe/cls/depth/1000", "财联社", "rss", "authoritative"),
-            new SourceConfig("https://rsshub.chn.moe/wallstreetcn/news/global", "华尔街见闻", "rss", "normal")
+            new SourceConfig("https://rsshub.chn.moe/cls/telegraph", "财联社电报", "rss", "authoritative"),
+            new SourceConfig("https://rsshub.chn.moe/wallstreetcn/news/global", "华尔街见闻", "rss", "normal"),
+            new SourceConfig("https://rsshub.chn.moe/jin10", "金十数据", "rss", "normal"),
+            new SourceConfig("https://rsshub.chn.moe/eastmoney/report/strategyreport", "东方财富研报", "rss", "authoritative")
     );
 
     private static final String LLM_EXTRACT_SYSTEM = """
