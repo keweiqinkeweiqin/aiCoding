@@ -10,6 +10,7 @@ import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.repository.NewsArticleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -17,10 +18,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-/**
- * Event clustering: group news articles about the same event into Intelligence.
- * Strategy: Embedding cosine similarity (primary) + SimHash (fallback)
- */
 @Service
 public class EventClusterService {
 
@@ -33,20 +30,22 @@ public class EventClusterService {
     private final NewsArticleRepository newsArticleRepository;
     private final DeduplicationService deduplicationService;
     private final EmbeddingClient embeddingClient;
+    private final ChatClient chatClient;
 
-    // Cache: intelligenceId -> title embedding
     private final ConcurrentHashMap<Long, float[]> intelEmbeddingCache = new ConcurrentHashMap<>();
 
     public EventClusterService(IntelligenceRepository intelligenceRepository,
                                IntelligenceArticleRepository intelligenceArticleRepository,
                                NewsArticleRepository newsArticleRepository,
                                DeduplicationService deduplicationService,
-                               EmbeddingClient embeddingClient) {
+                               EmbeddingClient embeddingClient,
+                               ChatClient.Builder chatClientBuilder) {
         this.intelligenceRepository = intelligenceRepository;
         this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.newsArticleRepository = newsArticleRepository;
         this.deduplicationService = deduplicationService;
         this.embeddingClient = embeddingClient;
+        this.chatClient = chatClientBuilder.build();
     }
 
     /**
@@ -283,6 +282,34 @@ public class EventClusterService {
                 .ifPresent(intel::setLatestArticleTime);
 
         intel.setPriority(computePriority(intel.getCredibilityScore(), intel.getSourceCount()));
+
+        // LLM: generate aggregated title + summary when multiple sources
+        if (articles.size() >= 2) {
+            try {
+                String titles = articles.stream()
+                        .map(a -> "[" + a.getSourceName() + "] " + a.getTitle())
+                        .collect(Collectors.joining("\n"));
+                String prompt = "Based on these news headlines about the same event, "
+                        + "generate a concise Chinese title (max 30 chars) and a summary (max 100 chars). "
+                        + "Return ONLY in format: TITLE: xxx\nSUMMARY: xxx\n\n" + titles;
+                String resp = chatClient.prompt().user(prompt).call().content();
+                if (resp != null) {
+                    for (String line : resp.split("\n")) {
+                        line = line.trim();
+                        if (line.startsWith("TITLE:")) {
+                            String t = line.substring(6).trim();
+                            if (!t.isBlank() && t.length() <= 200) intel.setTitle(t);
+                        } else if (line.startsWith("SUMMARY:")) {
+                            String s = line.substring(8).trim();
+                            if (!s.isBlank()) intel.setSummary(s);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("LLM title generation failed for intel {}: {}", intel.getId(), e.getMessage());
+            }
+        }
+
         intelligenceRepository.save(intel);
     }
 
