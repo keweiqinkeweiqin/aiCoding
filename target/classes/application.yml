@@ -48,3 +48,7 @@ collector:
     licence: ${MAIRUI_LICENCE:}
   tianapi:
     key: ${TIANAPI_KEY:1ac58e399382bf273fe31065d1a83c36}
+  newsapi:
+    key: ${NEWSAPI_KEY:10adcaec529e47aaab265a9a9b9ff973}
+  tushare:
+    token: ${TUSHARE_TOKEN:b1636f1270dd7dfcf2a929dc0cb5b98265c0eb720bab2bf978d13685}

@@ -22,6 +22,7 @@ public class MarketDataCollector {
     private static final Logger log = LoggerFactory.getLogger(MarketDataCollector.class);
     private final RestTemplate restTemplate;
     private final MarketDataRepository marketDataRepository;
+    private final TushareCollector tushareCollector;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${collector.market.licence:}")
@@ -55,9 +56,11 @@ public class MarketDataCollector {
         put("601127", "赛力斯");
     }};
 
-    public MarketDataCollector(RestTemplate restTemplate, MarketDataRepository marketDataRepository) {
+    public MarketDataCollector(RestTemplate restTemplate, MarketDataRepository marketDataRepository,
+                               TushareCollector tushareCollector) {
         this.restTemplate = restTemplate;
         this.marketDataRepository = marketDataRepository;
+        this.tushareCollector = tushareCollector;
     }
 
     public CollectResult collectAll() {
@@ -100,7 +103,18 @@ public class MarketDataCollector {
                 log.warn("采集{}行情失败: {}", entry.getKey(), e.getMessage());
             }
         }
-        log.info("行情采集完成: collected={}, stored={}", collected, stored);
+        log.info("Mairui collected: {}, stored: {}", collected, stored);
+
+        // Also collect from Tushare
+        try {
+            int tushareStored = tushareCollector.collectAll();
+            collected += tushareStored;
+            stored += tushareStored;
+            log.info("Tushare collected: {}", tushareStored);
+        } catch (Exception e) {
+            log.warn("Tushare failed: {}", e.getMessage());
+        }
+
         return new CollectResult(collected, 0, stored);
     }
 

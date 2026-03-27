@@ -28,6 +28,7 @@ public class NewsCollectorService {
     private final EventClusterService eventClusterService;
     private final ChatClient chatClient;
     private final com.example.demo.collector.TianApiCollector tianApiCollector;
+    private final com.example.demo.collector.NewsApiCollector newsApiCollector;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final List<SourceConfig> RSS_SOURCES = List.of(
@@ -50,7 +51,8 @@ public class NewsCollectorService {
             NewsArticleRepository newsArticleRepository, EmbeddingClient embeddingClient,
             VectorSearchService vectorSearchService, CredibilityService credibilityService,
             EventClusterService eventClusterService, ChatClient.Builder chatClientBuilder,
-            com.example.demo.collector.TianApiCollector tianApiCollector) {
+            com.example.demo.collector.TianApiCollector tianApiCollector,
+            com.example.demo.collector.NewsApiCollector newsApiCollector) {
         this.rssCollector = rssCollector;
         this.deduplicationService = deduplicationService;
         this.newsArticleRepository = newsArticleRepository;
@@ -60,6 +62,7 @@ public class NewsCollectorService {
         this.eventClusterService = eventClusterService;
         this.chatClient = chatClientBuilder.build();
         this.tianApiCollector = tianApiCollector;
+        this.newsApiCollector = newsApiCollector;
     }
 
     public CollectResult collectAll() {
@@ -142,6 +145,37 @@ public class NewsCollectorService {
             totalCollected += tianItems.size();
             sourceResults.add(new SourceResult("天聚数据", tianItems.size(), tianItems.size() - tianStored, tianStored));
         } catch (Exception e) { log.warn("TianAPI failed: {}", e.getMessage()); }
+
+        // NewsAPI global tech news
+        try {
+            var newsApiItems = newsApiCollector.collect();
+            int naStored = 0;
+            for (var item : newsApiItems) {
+                String plain = stripHtml(item.content());
+                String dup = deduplicationService.checkDuplicate(item.title(), item.link(), plain);
+                if (dup != null) { totalDeduplicated++; continue; }
+                NewsArticle a = new NewsArticle();
+                a.setTitle(item.title()); a.setContent(plain); a.setSourceUrl(item.link());
+                a.setSourceName(item.sourceName()); a.setSourceType("api");
+                a.setCredibilityLevel("normal");
+                a.setContentHash(deduplicationService.computeContentHash(plain));
+                a.setSummary(plain.length() > 100 ? plain.substring(0, 100) + "..." : plain);
+                newsArticleRepository.save(a);
+                try {
+                    float[] vec = embeddingClient.embed(a.getTitle());
+                    if (vec.length > 0) {
+                        java.util.List<Float> fl = new java.util.ArrayList<>();
+                        for (float v : vec) fl.add(v);
+                        a.setEmbeddingJson(objectMapper.writeValueAsString(fl));
+                        newsArticleRepository.save(a);
+                        vectorSearchService.addVector(a.getId(), vec);
+                    }
+                } catch (Exception e) { /* skip */ }
+                totalStored++; naStored++;
+            }
+            totalCollected += newsApiItems.size();
+            sourceResults.add(new SourceResult("NewsAPI", newsApiItems.size(), newsApiItems.size() - naStored, naStored));
+        } catch (Exception e) { log.warn("NewsAPI failed: {}", e.getMessage()); }
 
         assessCredibilityForRecent();
         try {
