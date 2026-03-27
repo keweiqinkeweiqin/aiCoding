@@ -3,13 +3,15 @@ const API = '';
 // --- Tab switching ---
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', t.textContent.includes(
-      {collect:'采集',news:'新闻',query:'问答',market:'行情'}[name]));
+    const map = {collect:'采集',news:'新闻',query:'问答',market:'行情',logs:'日志'};
+    t.classList.toggle('active', t.textContent.includes(map[name]));
   });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'news') loadNews();
   if (name === 'market') loadMarket();
+  if (name === 'logs') { startLogPolling(); loadLogs(); }
+  else stopLogPolling();
 }
 
 // --- Stats ---
@@ -177,5 +179,49 @@ async function loadMarket() {
 // --- Init ---
 initCollectPanel();
 initQueryPanel();
+initLogsPanel();
 loadStats();
 setInterval(loadStats, 30000);
+
+// --- Logs Panel ---
+let logInterval = null;
+
+function initLogsPanel() {
+  document.getElementById('panel-logs').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="color:#ffd700">实时日志（自动刷新）</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:12px;color:#8890b5"><input type="checkbox" id="logAutoScroll" checked> 自动滚动</label>
+        <button onclick="loadLogs()" style="padding:6px 14px;background:#1e2555;border:1px solid #2a3070;border-radius:6px;color:#8890b5;cursor:pointer;font-size:12px">刷新</button>
+      </div>
+    </div>
+    <div id="logContent" style="background:#0a0e27;border:1px solid #2a3070;border-radius:6px;padding:12px;height:500px;overflow-y:auto;font-family:'Menlo','Monaco',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;color:#9ca3af"></div>
+  `;
+}
+
+async function loadLogs() {
+  try {
+    const r = await fetch(API + '/api/logs?count=100');
+    const d = await r.json();
+    const el = document.getElementById('logContent');
+    if (!el) return;
+    el.innerHTML = d.logs.map(line => {
+      let color = '#9ca3af';
+      if (line.includes('ERROR')) color = '#ef4444';
+      else if (line.includes('WARN')) color = '#f59e0b';
+      else if (line.includes('INFO') && (line.includes('完成') || line.includes('成功'))) color = '#22c55e';
+      return `<span style="color:${color}">${esc(line)}</span>`;
+    }).join('\n');
+    if (document.getElementById('logAutoScroll')?.checked) {
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch(e) { console.error('日志加载失败', e); }
+}
+
+function startLogPolling() {
+  if (!logInterval) logInterval = setInterval(loadLogs, 2000);
+}
+
+function stopLogPolling() {
+  if (logInterval) { clearInterval(logInterval); logInterval = null; }
+}

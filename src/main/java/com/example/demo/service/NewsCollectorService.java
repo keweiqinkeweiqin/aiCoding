@@ -5,9 +5,11 @@ import com.example.demo.embedding.EmbeddingClient;
 import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.NewsArticle;
 import com.example.demo.repository.NewsArticleRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,6 +24,7 @@ public class NewsCollectorService {
     private final NewsArticleRepository newsArticleRepository;
     private final EmbeddingClient embeddingClient;
     private final VectorSearchService vectorSearchService;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final List<SourceConfig> RSS_SOURCES = List.of(
@@ -30,16 +33,31 @@ public class NewsCollectorService {
             new SourceConfig("https://rsshub.chn.moe/wallstreetcn/news/global", "华尔街见闻", "rss", "normal")
     );
 
+    private static final String LLM_EXTRACT_SYSTEM = """
+            你是AI科技领域财经分析师。分析新闻并提取结构化信息，严格返回JSON，不要添加任何额外文字。
+            """;
+
+    private static final String LLM_EXTRACT_USER = """
+            分析以下新闻，返回JSON：
+            {"summary":"一句话摘要(不超过80字)","tags":"标签逗号分隔如AI,芯片","relatedStocks":"关联股票代码逗号分隔","sentiment":"positive/negative/neutral","sentimentScore":0.0到1.0}
+            
+            标题：%s
+            来源：%s
+            内容：%s
+            """;
+
     public NewsCollectorService(RssCollector rssCollector,
                                  DeduplicationService deduplicationService,
                                  NewsArticleRepository newsArticleRepository,
                                  EmbeddingClient embeddingClient,
-                                 VectorSearchService vectorSearchService) {
+                                 VectorSearchService vectorSearchService,
+                                 ChatClient.Builder chatClientBuilder) {
         this.rssCollector = rssCollector;
         this.deduplicationService = deduplicationService;
         this.newsArticleRepository = newsArticleRepository;
         this.embeddingClient = embeddingClient;
         this.vectorSearchService = vectorSearchService;
+        this.chatClient = chatClientBuilder.build();
     }
 
     /**
@@ -76,10 +94,38 @@ public class NewsCollectorService {
                     article.setCredibilityLevel(source.credibility);
                     article.setContentHash(deduplicationService.computeContentHash(plainContent));
 
-                    // 基础摘要（LLM结构化等key到了再加）
-                    article.setSummary(plainContent.length() > 100
-                            ? plainContent.substring(0, 100) + "..."
-                            : plainContent);
+                    // LLM结构化提取
+                    try {
+                        String contentForLlm = plainContent.length() > 500 ? plainContent.substring(0, 500) : plainContent;
+                        String prompt = String.format(LLM_EXTRACT_USER, item.title(), source.name, contentForLlm);
+                        String llmResponse = chatClient.prompt()
+                                .system(LLM_EXTRACT_SYSTEM)
+                                .user(prompt)
+                                .call()
+                                .content();
+
+                        // 提取JSON（兼容```json```包裹）
+                        String json = llmResponse;
+                        if (json.contains("```json")) {
+                            json = json.substring(json.indexOf("```json") + 7);
+                            json = json.substring(0, json.indexOf("```"));
+                        } else if (json.contains("```")) {
+                            json = json.substring(json.indexOf("```") + 3);
+                            json = json.substring(0, json.indexOf("```"));
+                        }
+
+                        JsonNode node = objectMapper.readTree(json.trim());
+                        if (node.has("summary")) article.setSummary(node.get("summary").asText());
+                        if (node.has("tags")) article.setTags(node.get("tags").asText());
+                        if (node.has("relatedStocks")) article.setRelatedStocks(node.get("relatedStocks").asText());
+                        if (node.has("sentiment")) article.setSentiment(node.get("sentiment").asText());
+                        if (node.has("sentimentScore")) article.setSentimentScore(node.get("sentimentScore").asDouble());
+                        log.info("LLM结构化完成[{}]: sentiment={}, tags={}", item.title(),
+                                article.getSentiment(), article.getTags());
+                    } catch (Exception e) {
+                        log.warn("LLM结构化失败[{}]: {}, 使用基础提取", item.title(), e.getMessage());
+                        article.setSummary(plainContent.length() > 100 ? plainContent.substring(0, 100) + "..." : plainContent);
+                    }
 
                     newsArticleRepository.save(article);
 

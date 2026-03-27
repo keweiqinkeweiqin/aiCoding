@@ -105,4 +105,13 @@ public class NewsController {
                 "vectorCacheSize", vectorSearchService.cacheSize()
         );
     }
+
+    /** 实时日志（供前端轮询） */
+    @GetMapping("/logs")
+    public Map<String, Object> logs(@RequestParam(defaultValue = "50") int count) {
+        return Map.of(
+                "logs", com.example.demo.config.InMemoryLogAppender.getRecentLogs(count),
+                "total", com.example.demo.config.InMemoryLogAppender.totalSize()
+        );
+    }
 }
