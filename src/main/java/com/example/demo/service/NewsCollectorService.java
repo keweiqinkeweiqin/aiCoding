@@ -74,11 +74,14 @@ public class NewsCollectorService {
         int totalCollected = 0;
         int totalDeduplicated = 0;
         int totalStored = 0;
+        java.util.List<SourceResult> sourceResults = new java.util.ArrayList<>();
 
         for (SourceConfig source : RSS_SOURCES) {
+            int srcCollected = 0, srcDedup = 0, srcStored = 0;
             try {
                 List<RssCollector.RssItem> items = rssCollector.collect(source.url, source.name);
-                totalCollected += items.size();
+                srcCollected = items.size();
+                totalCollected += srcCollected;
 
                 for (RssCollector.RssItem item : items) {
                     // 去重检查
@@ -88,6 +91,7 @@ public class NewsCollectorService {
 
                     if (dupReason != null) {
                         totalDeduplicated++;
+                        srcDedup++;
                         continue;
                     }
 
@@ -152,10 +156,12 @@ public class NewsCollectorService {
                     }
 
                     totalStored++;
+                    srcStored++;
                 }
             } catch (Exception e) {
                 log.error("采集源 {} 失败: {}", source.name, e.getMessage());
             }
+            sourceResults.add(new SourceResult(source.name, srcCollected, srcDedup, srcStored));
         }
 
         // 采集完成后，对本批新入库的文章做置信度评估（需要交叉验证所以放最后）
@@ -163,7 +169,7 @@ public class NewsCollectorService {
 
         log.info("新闻采集完成: collected={}, deduplicated={}, stored={}",
                 totalCollected, totalDeduplicated, totalStored);
-        return new CollectResult(totalCollected, totalDeduplicated, totalStored);
+        return new CollectResult(totalCollected, totalDeduplicated, totalStored, sourceResults);
     }
 
     /** 对最近1小时入库的文章做置信度评估 */
@@ -192,6 +198,7 @@ public class NewsCollectorService {
         return html.replaceAll("<[^>]+>", "").replaceAll("&[a-zA-Z]+;", " ").trim();
     }
 
-    public record CollectResult(int collected, int deduplicated, int stored) {}
+    public record CollectResult(int collected, int deduplicated, int stored, List<SourceResult> sources) {}
+    public record SourceResult(String name, int collected, int deduplicated, int stored) {}
     private record SourceConfig(String url, String name, String type, String credibility) {}
 }

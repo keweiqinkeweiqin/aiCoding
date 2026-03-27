@@ -47,7 +47,13 @@ public class NewsController {
         return ResponseEntity.ok(Map.of(
                 "collected", result.collected(),
                 "deduplicated", result.deduplicated(),
-                "stored", result.stored()
+                "stored", result.stored(),
+                "sources", result.sources().stream().map(s -> Map.of(
+                        "name", s.name(),
+                        "collected", s.collected(),
+                        "deduplicated", s.deduplicated(),
+                        "stored", s.stored()
+                )).toList()
         ));
     }
 

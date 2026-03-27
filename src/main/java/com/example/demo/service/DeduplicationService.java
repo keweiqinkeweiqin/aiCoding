@@ -43,10 +43,11 @@ public class DeduplicationService {
             return "URL_MATCH";
         }
 
-        // Level 2: SimHash标题指纹（汉明距离≤3）
+        // Level 2: SimHash标题指纹（汉明距离≤2，只去掉几乎完全相同的标题）
+        // 注意：阈值故意收紧，给交叉验证留空间（交叉验证用≤10识别同一事件不同报道）
         long titleHash = simHash(title);
         for (var entry : titleFingerprints.entrySet()) {
-            if (hammingDistance(titleHash, entry.getValue()) <= 3) {
+            if (hammingDistance(titleHash, entry.getValue()) <= 2) {
                 log.debug("标题SimHash去重命中: {}", title);
                 return "TITLE_SIMHASH";
             }
@@ -58,11 +59,11 @@ public class DeduplicationService {
             return "CONTENT_HASH";
         }
 
-        // Level 4: SimHash内容指纹（捕获改写/转述）
+        // Level 4: SimHash内容指纹（汉明距离≤3，只去掉内容几乎相同的）
         if (content != null && content.length() > 50) {
             long contentHash = simHash(content);
             for (var entry : contentFingerprints.entrySet()) {
-                if (hammingDistance(contentHash, entry.getValue()) <= 5) {
+                if (hammingDistance(contentHash, entry.getValue()) <= 3) {
                     log.debug("内容SimHash去重命中: {}", title);
                     return "CONTENT_SIMHASH";
                 }

@@ -49,7 +49,13 @@ async function collectNews() {
   try {
     const r = await fetch(API + '/api/news/collect', {method:'POST'});
     const d = await r.json();
-    logCollect(`✅ 新闻采集完成: 采集${d.collected}条, 去重${d.deduplicated}条, 入库${d.stored}条`);
+    logCollect(`✅ 新闻采集完成: 总采集${d.collected}条, 去重${d.deduplicated}条, 入库${d.stored}条`);
+    if (d.sources) {
+      d.sources.forEach(s => {
+        const icon = s.stored > 0 ? '📥' : (s.collected > 0 ? '🔄' : '⚠️');
+        logCollect(`   ${icon} ${s.name}: 采集${s.collected} → 去重${s.deduplicated} → 入库${s.stored}`);
+      });
+    }
     loadStats();
   } catch(e) { logCollect('❌ 采集失败: ' + e.message); }
 }
@@ -89,6 +95,10 @@ async function loadNews() {
             ${esc(n.sourceName||'')} | ${n.sentiment ? '情感:'+n.sentiment : ''} ${n.tags ? '| 标签:'+esc(n.tags) : ''} | ${n.collectedAt||''}
           </div>
           <div style="font-size:13px;color:#9ca3af;line-height:1.5;margin-bottom:8px">${esc((n.summary||'').substring(0,200))}</div>
+          <details style="margin-bottom:8px">
+            <summary style="font-size:12px;color:#3b82f6;cursor:pointer;margin-bottom:6px">展开完整内容</summary>
+            <div style="font-size:13px;color:#9ca3af;line-height:1.8;padding:10px;background:#0a0e27;border-radius:6px;max-height:400px;overflow-y:auto;white-space:pre-wrap">${esc(n.content||'无内容')}</div>
+          </details>
           ${score > 0 ? `
           <div style="font-size:11px;color:#6b7280;margin-bottom:4px">置信度明细：</div>
           <div style="display:flex;gap:12px;font-size:11px;margin-bottom:6px">
