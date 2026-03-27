@@ -99,12 +99,12 @@ POST /api/auth/login
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| username | String | 是 | 用户名 |
+| phone | String | 是 | 手机号 |
 | password | String | 是 | 密码 |
 
 ```json
 {
-  "username": "zhangsan",
+  "phone": "13800138000",
   "password": "password123"
 }
 ```
@@ -130,7 +130,7 @@ POST /api/auth/login
 ```
 
 **错误场景：**
-- `400` — `"用户名或密码错误"`
+- `400` — `"手机号或密码错误"`
 
 **前端逻辑：**
 - 登录成功后将 `token` 和 `userId` 存入 localStorage

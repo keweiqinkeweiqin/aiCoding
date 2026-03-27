@@ -3,7 +3,7 @@
 // ============================================================
 
 const API = '';
-const USER_HEADERS = { 'X-User-Id': '1' };
+const USER_HEADERS = { 'X-User-Id': localStorage.getItem('userId') || '0' };
 
 // === Utility ===
 
