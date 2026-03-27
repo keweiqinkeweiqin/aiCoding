@@ -4,7 +4,6 @@ import com.example.demo.model.UserHolding;
 import com.example.demo.model.UserProfile;
 import com.example.demo.repository.UserHoldingRepository;
 import com.example.demo.repository.UserProfileRepository;
-import com.example.demo.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,7 +14,6 @@ public class ProfileService {
 
     private final UserProfileRepository profileRepository;
     private final UserHoldingRepository holdingRepository;
-    private final UserRepository userRepository;
 
     // 预定义的关注领域选项
     private static final List<Map<String, String>> FOCUS_OPTIONS = List.of(
@@ -32,11 +30,9 @@ public class ProfileService {
     );
 
     public ProfileService(UserProfileRepository profileRepository,
-                           UserHoldingRepository holdingRepository,
-                           UserRepository userRepository) {
+                           UserHoldingRepository holdingRepository) {
         this.profileRepository = profileRepository;
         this.holdingRepository = holdingRepository;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -93,13 +89,7 @@ public class ProfileService {
         }
         profileRepository.save(profile);
 
-        // 更新 user.hasProfile
-        userRepository.findById(userId).ifPresent(user -> {
-            user.setHasProfile(true);
-            userRepository.save(user);
-        });
-
-        return Map.of("code", 200, "message", "画像保存成功");
+        return Map.of("code", 200, "message", "saved");
     }
 
     /**
