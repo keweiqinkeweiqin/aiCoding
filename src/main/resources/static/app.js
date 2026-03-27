@@ -317,12 +317,7 @@ async function loadIntelDetail(id) {
 }
 
 // --- Init ---
-initCollectPanel();
-initQueryPanel();
-initIntelPanel();
-initLogsPanel();
-loadStats();
-setInterval(loadStats, 30000);
+// (moved to end of file after all function definitions)
 
 // --- Logs Panel ---
 let logInterval = null;
@@ -366,3 +361,11 @@ function startLogPolling() {
 function stopLogPolling() {
   if (logInterval) { clearInterval(logInterval); logInterval = null; }
 }
+
+// --- Init (must be last) ---
+initCollectPanel();
+initQueryPanel();
+initIntelPanel();
+initLogsPanel();
+loadStats();
+setInterval(loadStats, 30000);
