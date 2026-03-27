@@ -296,6 +296,12 @@ Response:
       }
     ],
     "personalizedAnalysis": {
+      "userProfile": {
+        "investorType": "growth",
+        "investmentCycle": "medium",
+        "focusAreas": ["AI芯片", "云计算", "半导体"],
+        "holdings": ["NVDA", "AMD"]
+      },
       "analysis": "基于多来源交叉验证，此次芯片出口管制将直接影响...",
       "impacts": [
         {
@@ -327,10 +333,14 @@ content 生成逻辑：
 - 生成后缓存，下次不重复调用
 
 personalizedAnalysis 说明：
-- 需要传 `userId` header 且用户有画像才会生成
+- 需要传 `userId` 参数且用户有画像才会生成
 - 不传或无画像时返回 `null`
-- 由 LLM 基于用户画像（投资者类型/关注领域/持仓）生成
-- 包含：个股影响分析(impacts) + 操作建议(suggestion) + 风险提示(risks)
+- 结构包含三部分：
+  - `userProfile`: 用户画像卡片（investorType/investmentCycle/focusAreas数组/holdings数组）
+  - `impacts`: LLM 基于用户持仓逐个分析的个股影响（level/volatility/revenueImpact/longTermImpact）
+  - `suggestion` + `risks`: LLM 基于画像生成的操作建议和风险提示
+- `analysis`: LLM 综合研判文本
+- `userContext`: 说明该分析基于何种画像生成
 
 sources 说明：
 - 返回所有关联的原始新闻（不去重）
