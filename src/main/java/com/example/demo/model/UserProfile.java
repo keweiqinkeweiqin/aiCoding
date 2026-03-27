@@ -17,7 +17,8 @@ public class UserProfile {
     private String investorType;     // conservative / balanced / growth
     private String investmentCycle;  // short / medium / long
     private String focusAreas;       // comma-separated: AI,chip,robot
-    private String holdings;         // comma-separated stock codes: NVDA,TSM
+    private String holdings;         // comma-separated stock names: 英伟达,台积电
+
     private LocalDateTime updatedAt;
 
     @PrePersist

@@ -79,29 +79,9 @@ Response:
 
 ## 二、用户画像模块 `/api/profile`
 
-### 2.1 GET /api/profile — 获取简易画像
+> 用户画像与持仓合并为一张表 `user_profiles`，只提供一个保存接口。
 
-Header: `X-User-Id: 1`
-
-Response:
-```json
-{
-  "code": 200,
-  "data": {
-    "userId": 1,
-    "investorType": "growth",
-    "investmentCycle": "medium",
-    "focusAreas": "AI,chip,robot",
-    "holdings": "NVDA,TSM"
-  }
-}
-```
-
-investorType: `conservative` | `balanced` | `growth`
-investmentCycle: `short` | `medium` | `long`
-focusAreas/holdings: 逗号分隔字符串
-
-### 2.2 PUT /api/profile — 保存简易画像
+### 2.1 PUT /api/profile/save — 保存完整画像（含持仓）
 
 Header: `X-User-Id: 1`
 
@@ -110,8 +90,8 @@ Request:
 {
   "investorType": "growth",
   "investmentCycle": "medium",
-  "focusAreas": "AI,chip,robot",
-  "holdings": "NVDA,TSM"
+  "focusAreas": ["AI", "chip", "robot"],
+  "holdings": ["英伟达", "台积电"]
 }
 ```
 
@@ -120,87 +100,18 @@ Response:
 { "code": 200, "message": "saved" }
 ```
 
-### 2.3 GET /api/profile/detail — 获取完整画像（含持仓详情）
+字段说明：
 
-Header: `X-User-Id: 1`
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| investorType | string | 投资者类型：`conservative` / `balanced` / `growth` |
+| investmentCycle | string | 投资周期：`short` / `medium` / `long` |
+| focusAreas | string[] | 关注领域，如 `["AI", "chip", "robot"]` |
+| holdings | string[] | 持仓股票名称，如 `["英伟达", "台积电"]` |
 
-Response:
-```json
-{
-  "code": 200,
-  "data": {
-    "investorType": "growth",
-    "investmentCycle": "medium",
-    "focusAreas": ["AI", "chip", "robot"],
-    "holdings": [
-      {
-        "stockCode": "NVDA",
-        "stockName": "NVIDIA",
-        "sector": "semiconductor",
-        "positionRatio": 0.3,
-        "costPrice": 120.5
-      }
-    ]
-  }
-}
-```
-
-### 2.4 PUT /api/profile/save — 保存完整画像
-
-Header: `X-User-Id: 1`
-
-Request:
-```json
-{
-  "investorType": "growth",
-  "investmentCycle": "medium",
-  "focusAreas": ["AI", "chip", "robot"]
-}
-```
-
-### 2.5 POST /api/profile/holdings — 添加持仓
-
-Header: `X-User-Id: 1`
-
-Request:
-```json
-{
-  "stockCode": "NVDA",
-  "stockName": "NVIDIA",
-  "sector": "semiconductor",
-  "positionRatio": 0.3,
-  "costPrice": 120.5
-}
-```
-
-### 2.6 DELETE /api/profile/holdings/{stockCode} — 删除持仓
-
-Header: `X-User-Id: 1`
-
-Example: `DELETE /api/profile/holdings/NVDA`
-
-### 2.7 GET /api/profile/focus-options — 可选关注领域
-
-Header: `X-User-Id: 1`
-
-Response:
-```json
-{
-  "code": 200,
-  "data": [
-    { "id": "ai_chip", "name": "AI芯片", "selected": true },
-    { "id": "cloud", "name": "云计算", "selected": false },
-    { "id": "semiconductor", "name": "半导体", "selected": true },
-    { "id": "llm", "name": "大模型", "selected": false },
-    { "id": "aigc", "name": "AIGC应用", "selected": false },
-    { "id": "autonomous", "name": "自动驾驶", "selected": false },
-    { "id": "robot", "name": "机器人", "selected": true },
-    { "id": "quantum", "name": "量子计算", "selected": false },
-    { "id": "biotech", "name": "生物科技", "selected": false },
-    { "id": "new_energy", "name": "新能源", "selected": false }
-  ]
-}
-```
+- 新用户首次调用自动创建画像
+- 已有用户调用则更新（按 userId upsert）
+- 所有字段均为可选，只更新传入的字段
 
 ---
 
@@ -506,7 +417,6 @@ Response:
 ```
 User (phone, nickname)
   └── UserProfile (investorType, investmentCycle, focusAreas, holdings)
-  └── UserHolding (stockCode, stockName, sector, positionRatio, costPrice)
   └── AnalysisRecord (newsArticleId, analysisText, investmentStyle)
 
 Intelligence (title, summary, content, priority, credibilityScore, sourceCount, sentiment, tags)
