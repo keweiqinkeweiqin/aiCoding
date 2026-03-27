@@ -73,20 +73,39 @@ async function loadNews() {
     const news = await r.json();
     if (!news.length) { panel.innerHTML = '<p style="color:#8890b5">暂无新闻，请先采集</p>'; return; }
     panel.innerHTML = `<h3 style="color:#ffd700;margin-bottom:16px">新闻列表 (${news.length}条)</h3>` +
-      news.map(n => `
+      news.map(n => {
+        const score = n.credibilityScore != null ? n.credibilityScore : 0;
+        const scoreColor = score >= 0.8 ? '#22c55e' : score >= 0.5 ? '#f59e0b' : '#ef4444';
+        const barWidth = Math.round(score * 100);
+        return `
         <div style="background:#151a40;border:1px solid #2a3070;border-radius:8px;padding:14px;margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <strong style="color:#e0e0e0;font-size:15px">${esc(n.title)}</strong>
             <span style="font-size:11px;padding:3px 8px;border-radius:10px;background:${
               n.credibilityLevel==='authoritative'?'#065f46':n.credibilityLevel==='normal'?'#92400e':'#991b1b'
-            };color:#fff">${n.credibilityLevel||'unknown'}</span>
+            };color:#fff">${n.credibilityLevel||'unknown'} ${score ? score.toFixed(2) : ''}</span>
           </div>
-          <div style="font-size:12px;color:#6b7280;margin-bottom:6px">${esc(n.sourceName||'')} | ${n.collectedAt||''}</div>
-          <div style="font-size:13px;color:#9ca3af;line-height:1.5">${esc((n.summary||'').substring(0,200))}</div>
-          ${n.embeddingJson ? '<span style="font-size:11px;color:#059669">✅ 已向量化</span>' : '<span style="font-size:11px;color:#6b7280">⏳ 未向量化</span>'}
-          ${n.sourceUrl ? ` | <a href="${esc(n.sourceUrl)}" target="_blank" style="font-size:11px;color:#3b82f6">原文链接</a>` : ''}
-        </div>
-      `).join('');
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px">
+            ${esc(n.sourceName||'')} | ${n.sentiment ? '情感:'+n.sentiment : ''} ${n.tags ? '| 标签:'+esc(n.tags) : ''} | ${n.collectedAt||''}
+          </div>
+          <div style="font-size:13px;color:#9ca3af;line-height:1.5;margin-bottom:8px">${esc((n.summary||'').substring(0,200))}</div>
+          ${score > 0 ? `
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px">置信度明细：</div>
+          <div style="display:flex;gap:12px;font-size:11px;margin-bottom:6px">
+            <span>来源 <span style="color:${scoreColor}">${(n.sourceCredibility||0).toFixed(2)}</span></span>
+            <span>LLM <span style="color:${scoreColor}">${(n.llmCredibility||0).toFixed(2)}</span></span>
+            <span>时效 <span style="color:${scoreColor}">${(n.freshnessCredibility||0).toFixed(2)}</span></span>
+            <span>交叉验证 <span style="color:${scoreColor}">${(n.crossCredibility||0).toFixed(2)}</span></span>
+          </div>
+          <div style="background:#0a0e27;border-radius:3px;height:4px;overflow:hidden">
+            <div style="background:${scoreColor};height:100%;width:${barWidth}%;transition:width .3s"></div>
+          </div>` : ''}
+          <div style="margin-top:6px">
+            ${n.embeddingJson ? '<span style="font-size:11px;color:#059669">✅ 已向量化</span>' : '<span style="font-size:11px;color:#6b7280">⏳ 未向量化</span>'}
+            ${n.sourceUrl ? ` | <a href="${esc(n.sourceUrl)}" target="_blank" style="font-size:11px;color:#3b82f6">原文链接</a>` : ''}
+          </div>
+        </div>`;
+      }).join('');
   } catch(e) { panel.innerHTML = '<p style="color:#ef4444">加载失败: '+e.message+'</p>'; }
 }
 

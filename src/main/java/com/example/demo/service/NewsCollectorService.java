@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -24,6 +25,7 @@ public class NewsCollectorService {
     private final NewsArticleRepository newsArticleRepository;
     private final EmbeddingClient embeddingClient;
     private final VectorSearchService vectorSearchService;
+    private final CredibilityService credibilityService;
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -54,12 +56,14 @@ public class NewsCollectorService {
                                  NewsArticleRepository newsArticleRepository,
                                  EmbeddingClient embeddingClient,
                                  VectorSearchService vectorSearchService,
+                                 CredibilityService credibilityService,
                                  ChatClient.Builder chatClientBuilder) {
         this.rssCollector = rssCollector;
         this.deduplicationService = deduplicationService;
         this.newsArticleRepository = newsArticleRepository;
         this.embeddingClient = embeddingClient;
         this.vectorSearchService = vectorSearchService;
+        this.credibilityService = credibilityService;
         this.chatClient = chatClientBuilder.build();
     }
 
@@ -154,9 +158,33 @@ public class NewsCollectorService {
             }
         }
 
+        // 采集完成后，对本批新入库的文章做置信度评估（需要交叉验证所以放最后）
+        assessCredibilityForRecent();
+
         log.info("新闻采集完成: collected={}, deduplicated={}, stored={}",
                 totalCollected, totalDeduplicated, totalStored);
         return new CollectResult(totalCollected, totalDeduplicated, totalStored);
+    }
+
+    /** 对最近1小时入库的文章做置信度评估 */
+    private void assessCredibilityForRecent() {
+        var recentArticles = newsArticleRepository.findByCollectedAtAfterOrderByCollectedAtDesc(
+                LocalDateTime.now().minusHours(1));
+        for (NewsArticle article : recentArticles) {
+            try {
+                var result = credibilityService.assess(article);
+                article.setCredibilityScore(result.overallScore());
+                article.setCredibilityLevel(result.level());
+                article.setSourceCredibility(result.sourceScore());
+                article.setLlmCredibility(result.llmScore());
+                article.setFreshnessCredibility(result.freshnessScore());
+                article.setCrossCredibility(result.crossScore());
+                newsArticleRepository.save(article);
+            } catch (Exception e) {
+                log.warn("置信度评估失败[{}]: {}", article.getTitle(), e.getMessage());
+            }
+        }
+        log.info("置信度评估完成: {} 条", recentArticles.size());
     }
 
     private String stripHtml(String html) {

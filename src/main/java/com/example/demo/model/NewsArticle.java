@@ -29,6 +29,13 @@ public class NewsArticle {
 
     private String credibilityLevel; // authoritative / normal / questionable
 
+    private Double credibilityScore; // 综合置信度 0.0-1.0
+
+    private Double sourceCredibility;    // 来源权威性分
+    private Double llmCredibility;       // LLM置信度分
+    private Double freshnessCredibility; // 时效性分
+    private Double crossCredibility;     // 交叉验证分
+
     private String sentiment; // positive / negative / neutral
 
     private Double sentimentScore;
@@ -74,6 +81,16 @@ public class NewsArticle {
     public void setSourceType(String sourceType) { this.sourceType = sourceType; }
     public String getCredibilityLevel() { return credibilityLevel; }
     public void setCredibilityLevel(String credibilityLevel) { this.credibilityLevel = credibilityLevel; }
+    public Double getCredibilityScore() { return credibilityScore; }
+    public void setCredibilityScore(Double credibilityScore) { this.credibilityScore = credibilityScore; }
+    public Double getSourceCredibility() { return sourceCredibility; }
+    public void setSourceCredibility(Double sourceCredibility) { this.sourceCredibility = sourceCredibility; }
+    public Double getLlmCredibility() { return llmCredibility; }
+    public void setLlmCredibility(Double llmCredibility) { this.llmCredibility = llmCredibility; }
+    public Double getFreshnessCredibility() { return freshnessCredibility; }
+    public void setFreshnessCredibility(Double freshnessCredibility) { this.freshnessCredibility = freshnessCredibility; }
+    public Double getCrossCredibility() { return crossCredibility; }
+    public void setCrossCredibility(Double crossCredibility) { this.crossCredibility = crossCredibility; }
     public String getSentiment() { return sentiment; }
     public void setSentiment(String sentiment) { this.sentiment = sentiment; }
     public Double getSentimentScore() { return sentimentScore; }
