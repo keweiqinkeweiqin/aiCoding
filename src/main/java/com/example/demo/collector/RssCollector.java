@@ -3,10 +3,14 @@ package com.example.demo.collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
 import org.w3c.dom.*;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.StringReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.xml.sax.InputSource;
@@ -15,16 +19,21 @@ import org.xml.sax.InputSource;
 public class RssCollector {
 
     private static final Logger log = LoggerFactory.getLogger(RssCollector.class);
-    private final RestTemplate restTemplate;
-
-    public RssCollector(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
-    }
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
 
     public List<RssItem> collect(String rssUrl, String sourceName) {
         List<RssItem> items = new ArrayList<>();
         try {
-            String xml = restTemplate.getForObject(rssUrl, String.class);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(rssUrl))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String xml = response.body();
             if (xml == null || xml.isBlank()) {
                 log.warn("RSS source returned empty: {}", rssUrl);
                 return items;
@@ -44,7 +53,6 @@ public class RssCollector {
                 String title = getText(el, "title");
                 String content = getFirstNonEmpty(el, "description", "content", "summary");
                 String link = getLink(el);
-
                 if (title != null && !title.isBlank()) {
                     items.add(new RssItem(title.trim(), content != null ? content.trim() : "", link, sourceName));
                 }
@@ -58,9 +66,7 @@ public class RssCollector {
 
     private String getText(Element parent, String tagName) {
         NodeList list = parent.getElementsByTagName(tagName);
-        if (list.getLength() > 0) {
-            return list.item(0).getTextContent();
-        }
+        if (list.getLength() > 0) return list.item(0).getTextContent();
         return null;
     }
 
