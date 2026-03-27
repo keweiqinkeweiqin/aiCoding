@@ -1,5 +1,7 @@
 package com.example.demo.service;
 
+import com.example.demo.embedding.EmbeddingClient;
+import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.Intelligence;
 import com.example.demo.model.IntelligenceArticle;
 import com.example.demo.model.NewsArticle;
@@ -12,31 +14,39 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 事件聚类服务：将报道同一事件的多条新闻聚合为一条情报(Intelligence)
- * 核心算法：SimHash 标题指纹，汉明距离 ≤ 10 判定为同一事件
+ * Event clustering: group news articles about the same event into Intelligence.
+ * Strategy: Embedding cosine similarity (primary) + SimHash (fallback)
  */
 @Service
 public class EventClusterService {
 
     private static final Logger log = LoggerFactory.getLogger(EventClusterService.class);
-    private static final int CLUSTER_HAMMING_THRESHOLD = 10;
+    private static final double EMBEDDING_SIMILARITY_THRESHOLD = 0.85;
+    private static final int SIMHASH_HAMMING_THRESHOLD = 20;
 
     private final IntelligenceRepository intelligenceRepository;
     private final IntelligenceArticleRepository intelligenceArticleRepository;
     private final NewsArticleRepository newsArticleRepository;
     private final DeduplicationService deduplicationService;
+    private final EmbeddingClient embeddingClient;
+
+    // Cache: intelligenceId -> title embedding
+    private final ConcurrentHashMap<Long, float[]> intelEmbeddingCache = new ConcurrentHashMap<>();
 
     public EventClusterService(IntelligenceRepository intelligenceRepository,
                                IntelligenceArticleRepository intelligenceArticleRepository,
                                NewsArticleRepository newsArticleRepository,
-                               DeduplicationService deduplicationService) {
+                               DeduplicationService deduplicationService,
+                               EmbeddingClient embeddingClient) {
         this.intelligenceRepository = intelligenceRepository;
         this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.newsArticleRepository = newsArticleRepository;
         this.deduplicationService = deduplicationService;
+        this.embeddingClient = embeddingClient;
     }
 
     /**
@@ -62,7 +72,14 @@ public class EventClusterService {
 
         for (NewsArticle article : unclustered) {
             long titleHash = deduplicationService.simHash(article.getTitle());
-            Intelligence matched = findMatchingIntelligence(titleHash, recentIntels);
+
+            // Try embedding similarity first (most accurate)
+            Intelligence matched = findByEmbedding(article, recentIntels);
+
+            // Fallback to SimHash
+            if (matched == null) {
+                matched = findBySimHash(titleHash, recentIntels);
+            }
 
             if (matched != null) {
                 // 关联到已有情报
@@ -74,6 +91,18 @@ public class EventClusterService {
                 // 创建新情报
                 Intelligence intel = createFromArticle(article, titleHash);
                 intelligenceRepository.save(intel);
+                // Cache embedding for future matching
+                float[] vec = getArticleEmbedding(article);
+                if (vec != null && vec.length > 0) {
+                    intelEmbeddingCache.put(intel.getId(), vec);
+                    try {
+                        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                        List<Float> fl = new ArrayList<>();
+                        for (float v : vec) fl.add(v);
+                        intel.setEmbeddingJson(om.writeValueAsString(fl));
+                        intelligenceRepository.save(intel);
+                    } catch (Exception ignored) {}
+                }
                 intelligenceArticleRepository.save(
                         new IntelligenceArticle(intel.getId(), article.getId(), true));
                 recentIntels.add(intel); // 加入列表供后续匹配
@@ -85,14 +114,87 @@ public class EventClusterService {
         return new ClusterResult(created, merged);
     }
 
-    private Intelligence findMatchingIntelligence(long titleHash, List<Intelligence> candidates) {
+    /** Primary: match by embedding cosine similarity */
+    private Intelligence findByEmbedding(NewsArticle article, List<Intelligence> candidates) {
+        try {
+            float[] articleVec = getArticleEmbedding(article);
+            if (articleVec == null || articleVec.length == 0) return null;
+
+            double bestSim = 0;
+            Intelligence bestMatch = null;
+
+            for (Intelligence intel : candidates) {
+                float[] intelVec = getIntelEmbedding(intel);
+                if (intelVec == null || intelVec.length == 0) continue;
+
+                double sim = VectorSearchService.cosineSimilarity(articleVec, intelVec);
+                if (sim > bestSim) {
+                    bestSim = sim;
+                    bestMatch = intel;
+                }
+            }
+
+            if (bestSim >= EMBEDDING_SIMILARITY_THRESHOLD) {
+                log.debug("Embedding match: {} -> {} (sim={})", article.getTitle(), bestMatch.getTitle(), bestSim);
+                return bestMatch;
+            }
+        } catch (Exception e) {
+            log.warn("Embedding match failed, falling back to SimHash: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /** Fallback: match by SimHash hamming distance */
+    private Intelligence findBySimHash(long titleHash, List<Intelligence> candidates) {
         for (Intelligence intel : candidates) {
             if (intel.getTitleSimhash() != null
-                    && deduplicationService.hammingDistance(titleHash, intel.getTitleSimhash()) <= CLUSTER_HAMMING_THRESHOLD) {
+                    && deduplicationService.hammingDistance(titleHash, intel.getTitleSimhash()) <= SIMHASH_HAMMING_THRESHOLD) {
                 return intel;
             }
         }
         return null;
+    }
+
+    private float[] getArticleEmbedding(NewsArticle article) {
+        // Use existing embedding if available
+        if (article.getEmbeddingJson() != null && !article.getEmbeddingJson().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                List<Float> list = om.readValue(article.getEmbeddingJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Float>>() {});
+                float[] vec = new float[list.size()];
+                for (int i = 0; i < list.size(); i++) vec[i] = list.get(i);
+                return vec;
+            } catch (Exception ignored) {}
+        }
+        // Generate on the fly
+        return embeddingClient.embed(article.getTitle());
+    }
+
+    private float[] getIntelEmbedding(Intelligence intel) {
+        // Check cache first
+        float[] cached = intelEmbeddingCache.get(intel.getId());
+        if (cached != null) return cached;
+
+        // Try stored embedding
+        if (intel.getEmbeddingJson() != null && !intel.getEmbeddingJson().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                List<Float> list = om.readValue(intel.getEmbeddingJson(),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Float>>() {});
+                float[] vec = new float[list.size()];
+                for (int i = 0; i < list.size(); i++) vec[i] = list.get(i);
+                intelEmbeddingCache.put(intel.getId(), vec);
+                return vec;
+            } catch (Exception ignored) {}
+        }
+
+        // Generate and cache
+        float[] vec = embeddingClient.embed(intel.getTitle());
+        if (vec != null && vec.length > 0) {
+            intelEmbeddingCache.put(intel.getId(), vec);
+        }
+        return vec;
     }
 
     private Intelligence createFromArticle(NewsArticle article, long titleHash) {
