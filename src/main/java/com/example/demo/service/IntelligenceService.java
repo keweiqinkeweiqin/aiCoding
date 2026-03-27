@@ -8,12 +8,14 @@ import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.repository.NewsArticleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class IntelligenceService {
@@ -23,13 +25,16 @@ public class IntelligenceService {
     private final IntelligenceRepository intelligenceRepository;
     private final IntelligenceArticleRepository intelligenceArticleRepository;
     private final NewsArticleRepository newsArticleRepository;
+    private final ChatClient chatClient;
 
     public IntelligenceService(IntelligenceRepository intelligenceRepository,
                                IntelligenceArticleRepository intelligenceArticleRepository,
-                               NewsArticleRepository newsArticleRepository) {
+                               NewsArticleRepository newsArticleRepository,
+                               ChatClient.Builder chatClientBuilder) {
         this.intelligenceRepository = intelligenceRepository;
         this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.newsArticleRepository = newsArticleRepository;
+        this.chatClient = chatClientBuilder.build();
     }
 
     /** 分页查询情报列表 */
@@ -83,37 +88,49 @@ public class IntelligenceService {
         return new IntelligenceDetail(intel, sources, readTime, articles);
     }
 
-    /** Generate content from linked articles (fallback when LLM unavailable) */
+    /** Generate content: LLM synthesis for multi-source, fallback to concatenation */
     private String generateContentFromArticles(Intelligence intel, List<NewsArticle> articles) {
         if (articles.isEmpty()) return "";
 
-        StringBuilder sb = new StringBuilder();
+        // Try LLM synthesis for multi-source intelligences
+        if (articles.size() >= 2) {
+            try {
+                String articlesText = articles.stream().map(a -> {
+                    String body = a.getSummary() != null ? a.getSummary() : "";
+                    if (body.isBlank() && a.getContent() != null) {
+                        body = a.getContent().length() > 300 ? a.getContent().substring(0, 300) : a.getContent();
+                    }
+                    return "[" + a.getSourceName() + "] " + a.getTitle() + "\n" + body;
+                }).collect(Collectors.joining("\n\n"));
 
-        // Summary section
-        if (intel.getSummary() != null && !intel.getSummary().isBlank()) {
-            sb.append(intel.getSummary()).append("\n\n");
+                String prompt = "You are a financial analyst. Based on the following news articles about the same event, "
+                        + "write a comprehensive Chinese analysis article (300-500 chars). "
+                        + "Structure: 1) Event overview 2) Key details from different sources 3) Market impact. "
+                        + "Write directly, no markdown headers.\n\n" + articlesText;
+
+                String content = chatClient.prompt().user(prompt).call().content();
+                if (content != null && !content.isBlank()) {
+                    log.info("LLM content generated for intel {}", intel.getId());
+                    return content;
+                }
+            } catch (Exception e) {
+                log.warn("LLM content generation failed for intel {}: {}", intel.getId(), e.getMessage());
+            }
         }
 
-        // Compile from all articles
+        // Fallback: concatenate articles
+        StringBuilder sb = new StringBuilder();
         for (int i = 0; i < articles.size(); i++) {
             NewsArticle a = articles.get(i);
             if (articles.size() > 1) {
                 sb.append("[").append(a.getSourceName() != null ? a.getSourceName() : "Source").append("] ");
             }
-            // Use content, fallback to summary
             String body = a.getContent();
             if (body == null || body.isBlank()) body = a.getSummary();
             if (body == null || body.isBlank()) body = a.getTitle();
-
             sb.append(body);
             if (i < articles.size() - 1) sb.append("\n\n---\n\n");
         }
-
-        // Related stocks
-        if (intel.getRelatedStocks() != null && !intel.getRelatedStocks().isBlank()) {
-            sb.append("\n\nRelated: ").append(intel.getRelatedStocks());
-        }
-
         return sb.toString();
     }
 
