@@ -43,7 +43,7 @@ public class EventClusterService {
      * 对最近采集的新闻执行聚类，生成/更新情报
      */
     public ClusterResult clusterRecent() {
-        // 找出所有未归类的新闻
+        // 重新从数据库读取（确保拿到置信度评估后的最新数据）
         List<NewsArticle> allRecent = newsArticleRepository
                 .findByCollectedAtAfterOrderByCollectedAtDesc(LocalDateTime.now().minusHours(48));
         List<NewsArticle> unclustered = allRecent.stream()
@@ -100,8 +100,18 @@ public class EventClusterService {
         intel.setTitle(article.getTitle());
         intel.setSummary(article.getSummary());
         intel.setPrimarySource(article.getSourceName());
-        intel.setCredibilityLevel(article.getCredibilityLevel());
-        intel.setCredibilityScore(article.getCredibilityScore());
+
+        // 如果文章没有置信度分数，基于来源给默认分
+        Double score = article.getCredibilityScore();
+        String level = article.getCredibilityLevel();
+        if (score == null || score == 0) {
+            if ("authoritative".equals(level)) { score = 0.75; }
+            else if ("normal".equals(level)) { score = 0.55; }
+            else { score = 0.4; }
+        }
+        intel.setCredibilityScore(score);
+        intel.setCredibilityLevel(level != null ? level : "normal");
+
         intel.setSourceCount(1);
         intel.setSentiment(article.getSentiment());
         intel.setSentimentScore(article.getSentimentScore());
@@ -109,7 +119,7 @@ public class EventClusterService {
         intel.setTags(article.getTags());
         intel.setTitleSimhash(titleHash);
         intel.setLatestArticleTime(article.getCollectedAt());
-        intel.setPriority(computePriority(article.getCredibilityScore(), 1));
+        intel.setPriority(computePriority(score, 1));
         return intel;
     }
 
@@ -129,14 +139,23 @@ public class EventClusterService {
                 .map(NewsArticle::getSourceName).distinct().count();
         intel.setSourceCount((int) sourceCount);
 
-        // 置信度取最高
+        // 置信度取最高，null 时基于来源给默认分
         articles.stream()
-                .filter(a -> a.getCredibilityScore() != null)
-                .max(Comparator.comparingDouble(NewsArticle::getCredibilityScore))
+                .map(a -> {
+                    Double s = a.getCredibilityScore();
+                    if (s == null || s == 0) {
+                        if ("authoritative".equals(a.getCredibilityLevel())) s = 0.75;
+                        else if ("normal".equals(a.getCredibilityLevel())) s = 0.55;
+                        else s = 0.4;
+                    }
+                    return Map.entry(a, s);
+                })
+                .max(Comparator.comparingDouble(Map.Entry::getValue))
                 .ifPresent(best -> {
-                    intel.setCredibilityScore(best.getCredibilityScore());
-                    intel.setCredibilityLevel(best.getCredibilityLevel());
-                    intel.setPrimarySource(best.getSourceName());
+                    intel.setCredibilityScore(best.getValue());
+                    intel.setCredibilityLevel(best.getKey().getCredibilityLevel() != null
+                            ? best.getKey().getCredibilityLevel() : "normal");
+                    intel.setPrimarySource(best.getKey().getSourceName());
                 });
 
         // 情感多数投票
