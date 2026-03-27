@@ -37,20 +37,18 @@ public class IntelligenceController {
             @RequestParam(defaultValue = "24") int hours,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "1") Long userId,
-            @RequestParam(required = false) String focusAreas,
-            @RequestParam(required = false) String holdings) {
+            @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
 
         Page<Intelligence> result = intelligenceService.listIntelligences(hours, page, size);
         List<Intelligence> items = new java.util.ArrayList<>(result.getContent());
 
-        // Auto-load from user profile if params not provided
-        if (focusAreas == null && holdings == null) {
-            UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
-            if (profile != null) {
-                focusAreas = profile.getFocusAreas();
-                holdings = profile.getHoldings();
-            }
+        // Load user profile for personalized sorting
+        String focusAreas = null;
+        String holdings = null;
+        UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
+        if (profile != null) {
+            focusAreas = profile.getFocusAreas();
+            holdings = profile.getHoldings();
         }
 
         // Personalized sorting

@@ -20,7 +20,7 @@ public class ProfileController {
     /** Get profile (use userId=1 as default until auth is implemented) */
     @GetMapping
     public ResponseEntity<Map<String, Object>> getProfile(
-            @RequestParam(defaultValue = "1") Long userId) {
+            @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId) {
         var profile = userProfileRepository.findByUserId(userId).orElse(null);
         if (profile == null) {
             return ResponseEntity.ok(Map.of("code", 200, "data", Map.of()));
@@ -37,7 +37,7 @@ public class ProfileController {
     /** Save or update profile */
     @PutMapping
     public ResponseEntity<Map<String, Object>> saveProfile(
-            @RequestParam(defaultValue = "1") Long userId,
+            @RequestHeader(value = "X-User-Id", defaultValue = "1") Long userId,
             @RequestBody Map<String, String> body) {
         var profile = userProfileRepository.findByUserId(userId).orElseGet(() -> {
             UserProfile p = new UserProfile();
