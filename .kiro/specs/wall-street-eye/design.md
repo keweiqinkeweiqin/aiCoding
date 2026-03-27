@@ -4,7 +4,7 @@
 
 华尔街之眼是一个聚焦 AI 与科技投资领域的智能情报引擎。系统从多个异构信息源（财经新闻 RSS/API、股票行情 API）自动采集数据，通过 LLM 进行结构化分析、去重、置信度评估和交叉验证，结合用户画像（关注领域、持仓、投资偏好）生成个性化的投研研判和操作建议。
 
-系统基于现有 Spring Boot 2.7.18 + H2 + JPA + Java 8 项目扩展，保持单体架构，前端为单页 HTML 应用。
+系统基于现有项目升级为 Spring Boot 3.x + Java 17 + Spring AI，保持单体架构，前端为单页 HTML 应用。
 
 存储方案：H2 嵌入式数据库（结构化数据持久化）+ 内存向量缓存（Embedding 语义检索）。部署为单个 jar 包，零外部依赖，`java -jar` 直接运行。
 
@@ -480,6 +480,46 @@ public NewsArticle basicExtract(NewsArticle article) {
 
 ### 3.7 Embedding 向量化与内存检索详情（步骤④）
 
+#### Embedding API 接入信息（公司幻视平台）
+
+| 配置项 | 值 |
+|--------|-----|
+| 模型 | `Doubao-Embedding-large-0515`（火山-豆包系列） |
+| 协议 | OpenAI 兼容（`/v1/embeddings`） |
+| 本地调试 | `https://pre-aibrain-large-model-engine.hellobike.cn/v1/embeddings` |
+| 线上部署 | `https://aibrain-large-model-engine.hellobike.cn/v1/embeddings` |
+| 认证 | `Authorization: Bearer {Secret_Key}` |
+| 单条最大token | 4096 |
+| 接入方式 | Spring AI 自动注入 `EmbeddingModel`，无需手写HTTP |
+
+请求示例：
+```bash
+curl -X POST https://fat-aibrain-large-model-engine.hellobike.cn/v1/embeddings \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "Authorization: Bearer sk-xxxxx" \
+  -d '{
+    "model": "Doubao-Embedding-large-0515",
+    "input": "英伟达发布新一代AI芯片",
+    "encoding_format": "float"
+  }'
+```
+
+响应示例：
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "index": 0,
+      "embedding": [0.029802695, -0.022286085, ...]
+    }
+  ],
+  "model": "Doubao-Embedding-large-0515",
+  "usage": { "prompt_tokens": 11, "total_tokens": 11 }
+}
+```
+
 #### 为什么用 H2 + 内存而不是 MongoDB + Chroma
 
 - 部署为单个 jar 包，零外部依赖，比赛演示稳定性最高
@@ -567,43 +607,27 @@ public class VectorSearchService {
 
 ```java
 /**
- * Embedding API 客户端
- * 调用赛方提供的 /v1/embeddings 接口
+ * 使用 Spring AI 的 EmbeddingModel（自动注入，无需手写HTTP）
  */
-@Component
-public class EmbeddingClient {
+@Service
+public class VectorSearchService {
 
-    private final RestTemplate restTemplate;
-    private final String apiUrl;    // 赛方Embedding API地址
-    private final String apiKey;
-    private final String model;     // 如 text-embedding-v1
+    private final EmbeddingModel embeddingModel;
+    private final ConcurrentHashMap<Long, float[]> vectorCache = new ConcurrentHashMap<>();
 
-    /**
-     * 对单条文本生成Embedding
-     * POST /v1/embeddings
-     * Request: { "model": "text-embedding-v1", "input": "文本内容" }
-     * Response: { "data": [{ "embedding": [0.1, 0.2, ...] }] }
-     */
-    public float[] getEmbedding(String text) {
-        Map<String, Object> request = new HashMap<>();
-        request.put("model", model);
-        request.put("input", text);
-
-        ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, request, String.class);
-        JsonNode data = objectMapper.readTree(response.getBody())
-            .get("data").get(0).get("embedding");
-
-        float[] vector = new float[data.size()];
-        for (int i = 0; i < data.size(); i++) {
-            vector[i] = (float) data.get(i).asDouble();
-        }
-        return vector;
+    public VectorSearchService(EmbeddingModel embeddingModel) {
+        this.embeddingModel = embeddingModel;
     }
 
     /**
-     * 批量Embedding（减少API调用次数）
+     * 对文本生成Embedding向量
+     * Spring AI 自动调用幻视平台 /v1/embeddings
      */
-    public List<float[]> getEmbeddings(List<String> texts);
+    public float[] embed(String text) {
+        return embeddingModel.embed(text);
+    }
+
+    // addVector, semanticSearch, findSemanticDuplicate, cosineSimilarity 等方法不变
 }
 ```
 
@@ -1098,17 +1122,27 @@ Response: {
 
 ### 6.1 LLM 客户端架构
 
+公司幻视平台采用 OpenAI 兼容协议，可直接使用 Spring AI 或 LangChain4j 框架接入。
+
+| 配置项 | 值 |
+|--------|-----|
+| 模型 | `Deepseek-V3-0324` |
+| 协议 | OpenAI 兼容（`/v1/chat/completions`） |
+| 本地调试 | `https://pre-aibrain-large-model-engine.hellobike.cn/v1/` |
+| 线上部署 | `https://aibrain-large-model-engine.hellobike.cn/v1/` |
+| 认证 | `Authorization: Bearer {Secret_Key}` |
+
 ```mermaid
 sequenceDiagram
     participant Service as 业务Service
     participant Client as LlmClient
     participant Template as PromptTemplate
-    participant API as LLM API (Qwen/DeepSeek)
+    participant API as 幻视平台 Deepseek-V3
 
     Service->>Template: 填充Prompt模板
     Template-->>Service: 完整Prompt
     Service->>Client: chat(prompt, model)
-    Client->>Client: 构建HTTP请求
+    Client->>Client: 构建HTTP请求（OpenAI兼容格式）
     Client->>API: POST /v1/chat/completions
     API-->>Client: JSON响应
     Client->>Client: 解析响应提取content
@@ -1116,36 +1150,92 @@ sequenceDiagram
     Service->>Service: 解析JSON/Markdown
 ```
 
-### 6.2 LLM 客户端封装
+### 6.2 Spring AI 集成（替代手写 RestTemplate）
+
+使用 Spring AI 后，LLM 和 Embedding 调用大幅简化：
 
 ```java
 /**
- * 统一LLM客户端，兼容OpenAI协议（Qwen/DeepSeek/GPT均兼容）
+ * Spring AI 自动注入 ChatClient，无需手写HTTP调用
  */
-public class LlmClient {
-    private final RestTemplate restTemplate;
-    private final String apiUrl;      // 赛方提供的API地址
-    private final String apiKey;      // 赛方提供的API Key
-    private final String modelName;   // 模型名称
+@Service
+public class LlmService {
+
+    private final ChatClient chatClient;
+
+    public LlmService(ChatClient.Builder builder) {
+        this.chatClient = builder.build();
+    }
 
     /**
      * 发送聊天请求
-     * @param systemPrompt 系统提示词
-     * @param userMessage 用户消息
-     * @return LLM返回的文本
      */
-    public String chat(String systemPrompt, String userMessage);
+    public String chat(String systemPrompt, String userMessage) {
+        return chatClient.prompt()
+            .system(systemPrompt)
+            .user(userMessage)
+            .call()
+            .content();
+    }
 
     /**
-     * 发送聊天请求并解析为JSON
-     * @param systemPrompt 系统提示词
-     * @param userMessage 用户消息
-     * @param responseClass 响应类型
-     * @return 解析后的对象
+     * 发送聊天请求并解析为JSON对象
      */
-    public <T> T chatAsJson(String systemPrompt, String userMessage, Class<T> responseClass);
+    public <T> T chatAsJson(String systemPrompt, String userMessage, Class<T> responseClass) {
+        String content = chat(systemPrompt, userMessage);
+        // 提取```json```代码块（如果有）
+        if (content.contains("```json")) {
+            content = content.substring(content.indexOf("```json") + 7);
+            content = content.substring(0, content.indexOf("```"));
+        }
+        return objectMapper.readValue(content.trim(), responseClass);
+    }
 }
 ```
+
+Embedding 同样由 Spring AI 自动注入：
+
+```java
+/**
+ * Spring AI 自动注入 EmbeddingModel
+ */
+@Service
+public class VectorSearchService {
+
+    private final EmbeddingModel embeddingModel;
+    private final ConcurrentHashMap<Long, float[]> vectorCache = new ConcurrentHashMap<>();
+
+    public VectorSearchService(EmbeddingModel embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
+
+    public float[] embed(String text) {
+        return embeddingModel.embed(text);
+    }
+
+    // ... semanticSearch, findSemanticDuplicate, cosineSimilarity 等方法不变
+}
+```
+
+#### Spring AI 配置（application.yml）
+
+```yaml
+spring:
+  ai:
+    openai:
+      api-key: ${LLM_API_KEY:your-secret-key-here}
+      base-url: https://pre-aibrain-large-model-engine.hellobike.cn
+      chat:
+        options:
+          model: Deepseek-V3-0324
+          temperature: 0.3
+          max-tokens: 2000
+      embedding:
+        options:
+          model: Doubao-Embedding-large-0515
+```
+
+> Spring AI 的 OpenAI 兼容模式会自动拼接 `/v1/chat/completions` 和 `/v1/embeddings` 路径。
 
 ### 6.3 Prompt 设计
 
@@ -1225,12 +1315,12 @@ public static final String SENTIMENT_USER =
 
 ### 6.4 LLM 调用策略
 
-| 场景 | 调用时机 | 模型选择 | 超时 | 降级策略 |
-|------|----------|----------|------|----------|
-| 新闻结构化 | 采集后立即 | Qwen（快） | 30s | 使用基础正则提取 |
-| 报告生成 | 用户请求时 | DeepSeek（强） | 60s | 返回原始数据摘要 |
-| 情绪计算 | 定时/手动 | Qwen（快） | 30s | 使用统计公式计算 |
-| 交叉验证 | 报告生成时 | Qwen（快） | 30s | 跳过验证标注 |
+| 场景 | 调用时机 | 模型 | 超时 | 降级策略 |
+|------|----------|------|------|----------|
+| 新闻结构化 | 采集后立即 | Deepseek-V3-0324 | 30s | 基础正则提取 |
+| 报告生成 | 用户请求时 | Deepseek-V3-0324 | 60s | 返回原始数据摘要 |
+| 情绪计算 | 定时/手动 | Deepseek-V3-0324 | 30s | 统计公式计算 |
+| 交叉验证 | 报告生成时 | Deepseek-V3-0324 | 30s | 跳过验证标注 |
 
 ## 7. 内容质量控制方案
 
@@ -2314,26 +2404,72 @@ public class GlobalExceptionHandler {
 
 ## 18. 依赖
 
-### 18.1 新增Maven依赖
+### 18.1 Maven 依赖变更
+
+升级为 Spring Boot 3.x + Java 17 + Spring AI：
 
 ```xml
-<!-- HTTP客户端（已有spring-boot-starter-web包含RestTemplate） -->
-<!-- 无需额外HTTP依赖 -->
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.0</version>
+</parent>
 
-<!-- JSON处理（Spring Boot已包含Jackson） -->
-<!-- 无需额外JSON依赖 -->
+<properties>
+    <java.version>17</java.version>
+    <spring-ai.version>1.0.0-M6</spring-ai.version>
+</properties>
 
-<!-- XML解析（用于RSS） -->
-<!-- JDK自带javax.xml.parsers，无需额外依赖 -->
+<dependencies>
+    <!-- Spring Boot 核心 -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
 
-<!-- MD5哈希计算 -->
-<!-- 使用java.security.MessageDigest，无需额外依赖 -->
+    <!-- H2 数据库 -->
+    <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <scope>runtime</scope>
+    </dependency>
 
-<!-- 定时任务 -->
-<!-- Spring Boot自带@Scheduled，无需额外依赖 -->
+    <!-- Spring AI - OpenAI兼容（接入幻视平台） -->
+    <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- 测试 -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-bom</artifactId>
+            <version>${spring-ai.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
 ```
 
-> 设计原则：尽量使用Spring Boot和JDK自带能力，最小化外部依赖，降低两天内的集成风险。
+> 升级要点：javax.persistence → jakarta.persistence，javax.validation → jakarta.validation。Spring AI 自动处理 LLM 和 Embedding 的 HTTP 调用，无需手写 RestTemplate。
 
 ### 18.2 前端CDN依赖
 
@@ -2432,24 +2568,23 @@ spring:
       ddl-auto: update
     show-sql: false
 
+  # Spring AI 配置（接入公司幻视平台，OpenAI兼容协议）
+  ai:
+    openai:
+      api-key: ${HUANSHI_API_KEY:your-secret-key-here}
+      # 本地调试用pre环境，线上部署改为 https://aibrain-large-model-engine.hellobike.cn
+      base-url: https://pre-aibrain-large-model-engine.hellobike.cn
+      chat:
+        options:
+          model: Deepseek-V3-0324
+          temperature: 0.3
+          max-tokens: 2000
+      embedding:
+        options:
+          model: Doubao-Embedding-large-0515
+
 server:
   port: 8080
-
-# LLM配置
-llm:
-  api-url: https://api.example.com/v1/chat/completions  # 赛方提供
-  api-key: ${LLM_API_KEY:your-api-key-here}
-  model: qwen-plus
-  timeout: 30000
-  max-tokens: 2000
-  temperature: 0.3
-
-# Embedding配置（可选，用于语义去重等增强功能）
-embedding:
-  api-url: https://api.example.com/v1/embeddings  # 赛方提供
-  api-key: ${EMBEDDING_API_KEY:your-api-key-here}
-  model: text-embedding-v1
-  enabled: false  # 默认关闭，核心功能不依赖
 
 # 数据采集配置
 collector:
@@ -2478,7 +2613,6 @@ collector:
     interval-ms: 300000  # 5分钟
     licence: ${MAIRUI_LICENCE:your-mairui-licence}
     api-base-url: https://api.mairui.club
-    # 预配置的AI概念股代码
     ai-stock-codes:
       - code: "002230"
         name: "科大讯飞"
