@@ -82,31 +82,36 @@ public class EventClusterService {
             }
 
             if (matched != null) {
-                // 关联到已有情报
-                intelligenceArticleRepository.save(
-                        new IntelligenceArticle(matched.getId(), article.getId(), false));
-                updateIntelligenceMetadata(matched);
-                merged++;
-            } else {
-                // 创建新情报
-                Intelligence intel = createFromArticle(article, titleHash);
-                intelligenceRepository.save(intel);
-                // Cache embedding for future matching
-                float[] vec = getArticleEmbedding(article);
-                if (vec != null && vec.length > 0) {
-                    intelEmbeddingCache.put(intel.getId(), vec);
-                    try {
-                        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
-                        List<Float> fl = new ArrayList<>();
-                        for (float v : vec) fl.add(v);
-                        intel.setEmbeddingJson(om.writeValueAsString(fl));
-                        intelligenceRepository.save(intel);
-                    } catch (Exception ignored) {}
+                try {
+                    intelligenceArticleRepository.save(
+                            new IntelligenceArticle(matched.getId(), article.getId(), false));
+                    updateIntelligenceMetadata(matched);
+                    merged++;
+                } catch (Exception e) {
+                    log.debug("Skip duplicate link for article {}", article.getId());
                 }
-                intelligenceArticleRepository.save(
-                        new IntelligenceArticle(intel.getId(), article.getId(), true));
-                recentIntels.add(intel); // 加入列表供后续匹配
-                created++;
+            } else {
+                try {
+                    Intelligence intel = createFromArticle(article, titleHash);
+                    intelligenceRepository.save(intel);
+                    float[] vec = getArticleEmbedding(article);
+                    if (vec != null && vec.length > 0) {
+                        intelEmbeddingCache.put(intel.getId(), vec);
+                        try {
+                            com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                            List<Float> fl = new ArrayList<>();
+                            for (float v : vec) fl.add(v);
+                            intel.setEmbeddingJson(om.writeValueAsString(fl));
+                            intelligenceRepository.save(intel);
+                        } catch (Exception ignored) {}
+                    }
+                    intelligenceArticleRepository.save(
+                            new IntelligenceArticle(intel.getId(), article.getId(), true));
+                    recentIntels.add(intel);
+                    created++;
+                } catch (Exception e) {
+                    log.debug("Skip duplicate link for article {}", article.getId());
+                }
             }
         }
 
