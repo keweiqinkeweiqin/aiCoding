@@ -3,12 +3,13 @@ const API = '';
 // --- Tab switching ---
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const map = {collect:'采集',news:'新闻',query:'问答',market:'行情',logs:'日志'};
+    const map = {collect:'采集',news:'新闻',intel:'情报',query:'问答',market:'行情',logs:'日志'};
     t.classList.toggle('active', t.textContent.includes(map[name]));
   });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'news') loadNews();
+  if (name === 'intel') loadIntelligences();
   if (name === 'market') loadMarket();
   if (name === 'logs') { startLogPolling(); loadLogs(); }
   else stopLogPolling();
@@ -205,12 +206,118 @@ async function loadMarket() {
   } catch(e) { panel.innerHTML = '<p style="color:#ef4444">加载失败: '+e.message+'</p>'; }
 }
 
+// --- Intelligence Panel ---
+function initIntelPanel() {
+  document.getElementById('panel-intel').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="color:#ffd700">情报中心</h3>
+      <div style="display:flex;gap:8px">
+        <button onclick="triggerCluster()" style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">🔄 手动聚类</button>
+        <button onclick="loadIntelligences()" style="padding:8px 16px;background:#1e2555;border:1px solid #2a3070;border-radius:6px;color:#8890b5;cursor:pointer;font-size:13px">刷新</button>
+      </div>
+    </div>
+    <div id="intelList" style="min-height:200px"></div>
+    <div id="intelDetail" style="display:none;margin-top:16px"></div>
+  `;
+}
+
+async function triggerCluster() {
+  try {
+    const r = await fetch(API + '/api/intelligences/cluster', {method:'POST'});
+    const d = await r.json();
+    alert('Clustering done: created=' + d.data.created + ', merged=' + d.data.merged);
+    loadIntelligences();
+  } catch(e) { alert('Cluster failed: ' + e.message); }
+}
+
+async function loadIntelligences() {
+  const el = document.getElementById('intelList');
+  el.innerHTML = '<p style="color:#8890b5">Loading...</p>';
+  document.getElementById('intelDetail').style.display = 'none';
+  try {
+    const r = await fetch(API + '/api/intelligences?hours=72&page=0&size=50');
+    const d = await r.json();
+    const items = d.data.content;
+    if (!items || !items.length) { el.innerHTML = '<p style="color:#8890b5">No intelligences yet. Collect news first, then run clustering.</p>'; return; }
+    el.innerHTML = items.map(i => {
+      const pColor = i.priority==='high'?'#ef4444':i.priority==='medium'?'#f59e0b':'#6b7280';
+      const pLabel = i.priority==='high'?'重要':i.priority==='medium'?'一般':'低';
+      const sColor = i.sentiment==='positive'?'#22c55e':i.sentiment==='negative'?'#ef4444':'#9ca3af';
+      const score = i.credibilityScore != null ? i.credibilityScore : 0;
+      const scoreColor = score >= 0.8 ? '#22c55e' : score >= 0.5 ? '#f59e0b' : '#ef4444';
+      return `
+      <div onclick="loadIntelDetail(${i.id})" style="background:#151a40;border:1px solid #2a3070;border-radius:8px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .2s" onmouseover="this.style.borderColor='#7c3aed'" onmouseout="this.style.borderColor='#2a3070'">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${pColor}20;color:${pColor}">${pLabel}</span>
+            <span style="font-size:11px;color:#6b7280">${esc(i.primarySource||'')}</span>
+          </div>
+          <span style="font-size:11px;color:#6b7280">${i.latestArticleTime ? new Date(i.latestArticleTime).toLocaleString() : ''}</span>
+        </div>
+        <div style="font-size:15px;color:#e0e0e0;font-weight:600;margin-bottom:6px">${esc(i.title)}</div>
+        <div style="font-size:13px;color:#9ca3af;margin-bottom:8px;line-height:1.5">${esc((i.summary||'').substring(0,150))}</div>
+        <div style="display:flex;gap:12px;align-items:center;font-size:11px">
+          <span style="padding:2px 8px;border-radius:10px;background:#065f4620;color:${scoreColor}">Score ${score.toFixed(2)}</span>
+          <span style="color:#8890b5">${i.sourceCount||1} sources</span>
+          <span style="color:${sColor}">${i.sentiment||'neutral'}</span>
+          ${i.tags ? '<span style="color:#6b7280">'+esc(i.tags)+'</span>' : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = '<p style="color:#ef4444">Load failed: '+e.message+'</p>'; }
+}
+
+async function loadIntelDetail(id) {
+  const el = document.getElementById('intelDetail');
+  el.style.display = 'block';
+  el.innerHTML = '<p style="color:#8890b5">Loading detail...</p>';
+  el.scrollIntoView({behavior:'smooth'});
+  try {
+    const r = await fetch(API + '/api/intelligences/' + id);
+    const d = await r.json();
+    const i = d.data;
+    let html = `
+    <div style="background:#151a40;border:1px solid #7c3aed;border-radius:8px;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="color:#ffd700;font-size:18px">${esc(i.title)}</h3>
+        <button onclick="document.getElementById('intelDetail').style.display='none'" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:18px">✕</button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px;font-size:12px;color:#8890b5">
+        <span>${esc(i.primarySource||'')}</span>
+        <span>${i.readTime||''}</span>
+        <span>${i.sourceCount||1} sources</span>
+        <span style="color:${i.credibilityScore>=0.8?'#22c55e':'#f59e0b'}">Score ${(i.credibilityScore||0).toFixed(2)}</span>
+      </div>`;
+    if (i.summary) {
+      html += `<div style="font-size:14px;color:#c0c0c0;line-height:1.6;margin-bottom:16px;padding:12px;background:#0a0e27;border-radius:6px">${esc(i.summary)}</div>`;
+    }
+    if (i.content) {
+      html += `<div style="font-size:14px;color:#e0e0e0;line-height:1.8;margin-bottom:16px;white-space:pre-wrap">${esc(i.content)}</div>`;
+    }
+    if (i.sources && i.sources.length) {
+      html += '<div style="margin-bottom:16px"><div style="font-size:14px;color:#7c3aed;margin-bottom:8px;font-weight:600">📎 Sources (' + i.sources.length + ')</div>';
+      i.sources.forEach(s => {
+        const tagColor = s.credibilityTag==='权威'?'#065f46':s.credibilityTag==='可信'?'#92400e':'#991b1b';
+        html += `<div style="background:#0a0e27;border:1px solid #2a3070;border-radius:6px;padding:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;padding:2px 6px;border-radius:10px;background:${tagColor};color:#fff">${esc(s.credibilityTag)}</span>
+            <span style="font-size:13px;color:#e0e0e0">${esc(s.sourceName||'')}</span>
+          </div>
+          ${s.sourceUrl ? '<a href="'+esc(s.sourceUrl)+'" target="_blank" style="font-size:12px;color:#3b82f6">View ↗</a>' : ''}
+        </div>`;
+      });
+      html += '</div>';
+    }
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px">
+      ${i.relatedStocks ? '<span style="color:#f59e0b">Stocks: '+esc(i.relatedStocks)+'</span>' : ''}
+      ${i.tags ? '<span style="color:#8890b5">Tags: '+esc(i.tags)+'</span>' : ''}
+    </div></div>`;
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<p style="color:#ef4444">Detail load failed: '+e.message+'</p>'; }
+}
+
 // --- Init ---
-initCollectPanel();
-initQueryPanel();
-initLogsPanel();
-loadStats();
-setInterval(loadStats, 30000);
+// (moved to end of file after all function definitions)
 
 // --- Logs Panel ---
 let logInterval = null;
@@ -254,3 +361,11 @@ function startLogPolling() {
 function stopLogPolling() {
   if (logInterval) { clearInterval(logInterval); logInterval = null; }
 }
+
+// --- Init (must be last) ---
+initCollectPanel();
+initQueryPanel();
+initIntelPanel();
+initLogsPanel();
+loadStats();
+setInterval(loadStats, 30000);
