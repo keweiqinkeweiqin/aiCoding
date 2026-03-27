@@ -3,16 +3,22 @@ package com.example.demo.service;
 import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.NewsArticle;
 import com.example.demo.repository.NewsArticleRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
  * 智能问答：用户输入 → Embedding语义检索相关新闻 → LLM推理生成分析
+ * 使用 Qwen3.5-flash 做问答（比GPT-5.4快很多）
  */
 @Service
 public class SmartQueryService {
@@ -20,19 +26,26 @@ public class SmartQueryService {
     private static final Logger log = LoggerFactory.getLogger(SmartQueryService.class);
     private final VectorSearchService vectorSearchService;
     private final NewsArticleRepository newsArticleRepository;
-    private final ChatClient chatClient;
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${spring.ai.openai.base-url}")
+    private String baseUrl;
+
+    @Value("${spring.ai.openai.api-key}")
+    private String apiKey;
 
     public SmartQueryService(VectorSearchService vectorSearchService,
                              NewsArticleRepository newsArticleRepository,
-                             ChatClient.Builder chatClientBuilder) {
+                             RestTemplate restTemplate) {
         this.vectorSearchService = vectorSearchService;
         this.newsArticleRepository = newsArticleRepository;
-        this.chatClient = chatClientBuilder.build();
+        this.restTemplate = restTemplate;
     }
 
     public QueryResult query(String userQuestion) {
-        // 1. 语义检索最相关的5篇新闻
-        List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 5);
+        // 1. 语义检索最相关的15篇新闻
+        List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 15);
         List<NewsArticle> relatedArticles = articleIds.stream()
                 .map(newsArticleRepository::findById)
                 .filter(java.util.Optional::isPresent)
@@ -43,15 +56,21 @@ public class SmartQueryService {
             return new QueryResult("暂无相关新闻数据，请先采集新闻。", List.of(), 0);
         }
 
-        // 2. 组装上下文
+        // 2. 组装上下文（优先用摘要，节省token让更多文章进入上下文）
         String newsContext = relatedArticles.stream()
-                .map(a -> String.format("【%s】%s\n来源: %s | 可信度: %s\n%s",
-                        a.getSourceName(), a.getTitle(),
-                        a.getSourceUrl(), a.getCredibilityLevel(),
-                        a.getContent() != null && a.getContent().length() > 300
-                                ? a.getContent().substring(0, 300) + "..."
-                                : a.getContent()))
-                .collect(Collectors.joining("\n\n---\n\n"));
+                .map(a -> {
+                    String body = a.getSummary() != null && !a.getSummary().isBlank()
+                            ? a.getSummary()
+                            : (a.getContent() != null && a.getContent().length() > 200
+                                    ? a.getContent().substring(0, 200) + "..."
+                                    : a.getContent());
+                    return String.format("[%s|%s] %s — %s",
+                            a.getSourceName(),
+                            a.getCredibilityLevel() != null ? a.getCredibilityLevel() : "unknown",
+                            a.getTitle(),
+                            body);
+                })
+                .collect(Collectors.joining("\n"));
 
         // 3. 调LLM推理
         String systemPrompt = """
@@ -75,16 +94,35 @@ public class SmartQueryService {
                 """, relatedArticles.size(), newsContext, userQuestion);
 
         try {
-            String answer = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
+            String answer = callLlm(systemPrompt, userPrompt);
             return new QueryResult(answer, relatedArticles, relatedArticles.size());
         } catch (Exception e) {
             log.error("LLM推理失败: {}", e.getMessage());
             return new QueryResult("AI分析服务暂时不可用: " + e.getMessage(), relatedArticles, relatedArticles.size());
         }
+    }
+
+    /** 使用 Qwen3.5-flash 做问答（快） */
+    private String callLlm(String systemPrompt, String userPrompt) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
+
+        Map<String, Object> body = Map.of(
+                "model", "Qwen3.5-flash",
+                "messages", List.of(
+                        Map.of("role", "system", "content", systemPrompt),
+                        Map.of("role", "user", "content", userPrompt)
+                ),
+                "temperature", 0.3
+        );
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                baseUrl + "/v1/chat/completions", request, String.class);
+
+        JsonNode root = objectMapper.readTree(response.getBody());
+        return root.get("choices").get(0).get("message").get("content").asText();
     }
 
     public record QueryResult(String answer, List<NewsArticle> relatedNews, int matchedCount) {}
