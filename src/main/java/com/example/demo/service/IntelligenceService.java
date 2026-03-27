@@ -42,12 +42,11 @@ public class IntelligenceService {
     /** 获取情报详情，包含关联的所有原始新闻 */
     public IntelligenceDetail getDetail(Long id) {
         Intelligence intel = intelligenceRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("情报不存在: " + id));
+                .orElseThrow(() -> new NoSuchElementException("Intelligence not found: " + id));
 
         // 获取关联的新闻列表
-        List<IntelligenceArticle> links = intelligenceArticleRepository
+        List<IntelligenceArticle> myLinks = intelligenceArticleRepository
                 .findByIntelligenceIdOrderByIsPrimaryDesc(id);
-        List<IntelligenceArticle> myLinks = links;
 
         List<Long> articleIds = myLinks.stream()
                 .map(IntelligenceArticle::getArticleId).toList();
@@ -59,6 +58,13 @@ public class IntelligenceService {
             double sb = b.getCredibilityScore() != null ? b.getCredibilityScore() : 0;
             return Double.compare(sb, sa);
         });
+
+        // 如果情报没有 content，从关联新闻生成
+        if (intel.getContent() == null || intel.getContent().isBlank()) {
+            String generated = generateContentFromArticles(intel, articles);
+            intel.setContent(generated);
+            intelligenceRepository.save(intel);
+        }
 
         // 构建来源列表
         List<SourceInfo> sources = articles.stream().map(a -> new SourceInfo(
@@ -72,9 +78,43 @@ public class IntelligenceService {
         // 估算阅读时间
         int contentLength = intel.getContent() != null ? intel.getContent().length() : 0;
         int readMinutes = Math.max(1, contentLength / 500);
-        String readTime = "约" + readMinutes + "分钟";
+        String readTime = (readMinutes <= 1) ? "1 min" : readMinutes + " min";
 
-        return new IntelligenceDetail(intel, sources, readTime);
+        return new IntelligenceDetail(intel, sources, readTime, articles);
+    }
+
+    /** Generate content from linked articles (fallback when LLM unavailable) */
+    private String generateContentFromArticles(Intelligence intel, List<NewsArticle> articles) {
+        if (articles.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+
+        // Summary section
+        if (intel.getSummary() != null && !intel.getSummary().isBlank()) {
+            sb.append(intel.getSummary()).append("\n\n");
+        }
+
+        // Compile from all articles
+        for (int i = 0; i < articles.size(); i++) {
+            NewsArticle a = articles.get(i);
+            if (articles.size() > 1) {
+                sb.append("[").append(a.getSourceName() != null ? a.getSourceName() : "Source").append("] ");
+            }
+            // Use content, fallback to summary
+            String body = a.getContent();
+            if (body == null || body.isBlank()) body = a.getSummary();
+            if (body == null || body.isBlank()) body = a.getTitle();
+
+            sb.append(body);
+            if (i < articles.size() - 1) sb.append("\n\n---\n\n");
+        }
+
+        // Related stocks
+        if (intel.getRelatedStocks() != null && !intel.getRelatedStocks().isBlank()) {
+            sb.append("\n\nRelated: ").append(intel.getRelatedStocks());
+        }
+
+        return sb.toString();
     }
 
     private String mapCredibilityTag(String level) {
@@ -96,6 +136,7 @@ public class IntelligenceService {
     public record IntelligenceDetail(
             Intelligence intelligence,
             List<SourceInfo> sources,
-            String readTime
+            String readTime,
+            List<NewsArticle> articles
     ) {}
 }
