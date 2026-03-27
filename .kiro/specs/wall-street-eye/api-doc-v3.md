@@ -349,6 +349,17 @@ Response:
         "title": "NVIDIA B300: AI算力再升级",
         "sourceUrl": "https://..."
       }
+    ],
+    "relatedIntelligences": [
+      {
+        "id": 5,
+        "title": "台积电3nm产能满载，AI芯片需求旺盛",
+        "summary": "台积电最新财报显示...",
+        "primarySource": "36Kr资讯",
+        "sourceCount": 2,
+        "credibilityScore": 0.75,
+        "latestArticleTime": "2026-03-26T14:00:00"
+      }
     ]
   }
 }
@@ -399,6 +410,82 @@ Response:
 1. Embedding 余弦相似度 >= 0.85 → 合并到已有情报
 2. SimHash 汉明距离 <= 20 → 合并（fallback）
 3. 都不匹配 → 创建新情报
+
+---
+
+## 三B、市场洞察 `/api/insight`（聚合接口）
+
+### 3B.1 GET /api/insight — 洞察页全部数据
+
+Params: `?days=7`（默认7天）
+
+一次返回四个模块：overview + sectors + events + reports
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "overview": {
+      "sentimentIndex": 68,
+      "sentimentLabel": "Greed",
+      "totalIntelligences": 156,
+      "positiveCount": 106,
+      "negativeCount": 25,
+      "aiHeatPercent": 92,
+      "stockUp": 30,
+      "stockDown": 15,
+      "trendData": [
+        { "date": "2026-03-21", "value": 55 },
+        { "date": "2026-03-27", "value": 68 }
+      ]
+    },
+    "sectors": [
+      { "rank": 1, "name": "AI", "intelCount": 32, "heatScore": 96 },
+      { "rank": 2, "name": "chip", "intelCount": 24, "heatScore": 92 }
+    ],
+    "events": [
+      {
+        "id": 1,
+        "time": "2026-03-27T08:32:00",
+        "title": "美国商务部宣布最新AI芯片出口管制新政",
+        "summary": "...",
+        "sourceCount": 3,
+        "impactTag": "major",
+        "sentiment": "negative",
+        "tags": "AI,chip"
+      }
+    ],
+    "reports": [
+      {
+        "id": 101,
+        "title": "2023年全球AI芯片行业深度报告",
+        "source": "东方财富研报",
+        "sourceUrl": "https://...",
+        "publishedAt": "2026-03-25T10:00:00",
+        "summary": "..."
+      }
+    ]
+  }
+}
+```
+
+overview 说明：
+- `sentimentIndex`: 0-100，基于 positive 占比
+- `sentimentLabel`: Extreme Greed(>=75) / Greed(>=55) / Neutral(>=45) / Fear(>=25) / Extreme Fear(<25)
+- `aiHeatPercent`: AI 相关情报占比
+- `trendData`: 每天的情绪指数，用于绘制趋势图
+
+sectors 说明：
+- 基于 Intelligence.tags 聚合计数
+- `heatScore` = min(99, intelCount * 10)
+
+events 说明：
+- 按时间倒序的情报列表
+- `impactTag`: major(高优先级) / moderate(高置信度) / positive(积极情感) / minor(其他)
+
+reports 说明：
+- 从研报类新闻源筛选
 
 ---
 
@@ -590,10 +677,6 @@ credibilityLevel: `authoritative`(>=0.8) | `normal`(>=0.5) | `questionable`(<0.5
 
 | 交互稿页面 | 需要的接口 | 说明 |
 |-----------|-----------|------|
-| 市场洞察页 | GET /api/insight/overview | 市场情绪指数 + 趋势图 |
-| 市场洞察页 | GET /api/insight/sectors | 行业热度榜 |
-| 市场洞察页 | GET /api/insight/events | 热门事件时间轴 |
-| 市场洞察页 | GET /api/insight/reports | 热门研报 |
 | 搜索页 | POST /api/search | 搜索情报 |
 | 搜索页 | GET /api/search/history | 搜索历史 |
 | 搜索页 | GET /api/search/trending | 热门搜索 |
