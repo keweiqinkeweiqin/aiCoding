@@ -4,6 +4,27 @@
 > Base URL: `http://{host}:8080`
 > 认证方式: Header `X-User-Id: {userId}`（登录后获取）
 
+## 认证流程
+
+1. 调 `POST /api/auth/login` 传手机号，返回 `userId`
+2. 前端存储 `userId`，后续请求在 Header 中带 `X-User-Id: {userId}`
+3. 不传 `X-User-Id` 的接口也能用，但个性化功能（排序/分析）不生效
+
+需要 X-User-Id 的接口汇总：
+
+| 接口 | X-User-Id 作用 | 不传时行为 |
+|------|---------------|-----------|
+| GET /api/home | 读取昵称+画像标签 | 返回 Guest |
+| GET /api/intelligences | 读取画像做个性化排序 | 按时间倒序（不排序） |
+| GET /api/intelligences/{id} | 调 LLM 生成个性化分析 | personalizedAnalysis=null |
+| GET /api/profile | 读取画像 | 返回空 |
+| PUT /api/profile | 保存画像 | 默认 userId=1 |
+| GET /api/auth/me | 获取用户信息 | 401 |
+| PUT /api/auth/me | 修改昵称 | 404 |
+| POST /api/analysis/generate | 生成 AI 研判 | 401 |
+| GET /api/analysis/stream | SSE 流式研判 | 返回错误 |
+| GET /api/analysis/history | 研判历史 | 401 |
+
 ---
 
 ## 一、认证模块 `/api/auth`
@@ -218,6 +239,8 @@ Response:
 
 ### 3.2 GET /api/intelligences/{id} — 情报详情
 
+Header: `X-User-Id: 1`（可选，传了会返回个性化分析）
+
 Response:
 ```json
 {
@@ -271,14 +294,43 @@ Response:
         "credibilityScore": 0.75,
         "latestArticleTime": "2026-03-26T14:00:00"
       }
-    ]
+    ],
+    "personalizedAnalysis": {
+      "analysis": "基于多来源交叉验证，此次芯片出口管制将直接影响...",
+      "impacts": [
+        {
+          "stock": "NVDA",
+          "impact": "中国区数据中心业务收入预计下降15-20%",
+          "level": "重大影响",
+          "volatility": "短期波动±8%",
+          "revenueImpact": "2024财年整体营收影响-3%~-5%",
+          "longTermImpact": "中国市场份额可能逐步被国产芯片替代"
+        },
+        {
+          "stock": "AMD",
+          "impact": "MI300系列芯片出口同样受限",
+          "level": "中等影响",
+          "volatility": "短期波动±3%"
+        }
+      ],
+      "suggestion": "短期观望NVDA，关注国产AI芯片替代标的（寒武纪、海光信息）",
+      "risks": ["政策进一步收紧风险", "国产替代进度不及预期"],
+      "userContext": "基于成长型投资者画像，关注AI芯片/云计算领域，持仓NVDA/AMD"
+    }
   }
 }
 ```
 
 content 生成逻辑：
-- 如果 LLM 可用: 基于多条新闻综合生成分析文章
-- 如果 LLM 不可用: 拼接关联新闻内容，按来源分段
+- 多来源（>=2条新闻）: LLM 综合生成中文分析文章（300-500字）
+- 单来源或 LLM 失败: 使用原始新闻内容
+- 生成后缓存，下次不重复调用
+
+personalizedAnalysis 说明：
+- 需要传 `X-User-Id` header 且用户有画像才会生成
+- 不传或无画像时返回 `null`
+- 由 LLM 基于用户画像（投资者类型/关注领域/持仓）生成
+- 包含：个股影响分析(impacts) + 操作建议(suggestion) + 风险提示(risks)
 
 sources 说明：
 - 返回所有关联的原始新闻（不去重）
