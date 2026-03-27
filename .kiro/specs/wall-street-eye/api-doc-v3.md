@@ -77,6 +77,63 @@ Response:
 
 ---
 
+## 一B、首页模块 `/api/home`
+
+### 1B.1 GET /api/home — 首页聚合数据
+
+Header: `X-User-Id: 1`（可选，不传返回 Guest）
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "greeting": {
+      "nickname": "Tom",
+      "profileTag": "Growth | AI",
+      "marketStatus": "Market sentiment is bullish, 56 intel tracked"
+    },
+    "quickActions": [
+      { "id": "collect", "name": "Collect News", "icon": "refresh" },
+      { "id": "query", "name": "Smart Q&A", "icon": "chat" },
+      { "id": "market", "name": "Market Data", "icon": "chart" },
+      { "id": "profile", "name": "My Profile", "icon": "user" }
+    ],
+    "marketOverview": {
+      "sentimentIndex": 72,
+      "sentimentLabel": "Bullish",
+      "totalIntelligences": 56,
+      "positiveCount": 40,
+      "negativeCount": 8,
+      "neutralCount": 8,
+      "stockUp": 30,
+      "stockDown": 15,
+      "stockFlat": 5,
+      "avgChangePercent": 1.23,
+      "hotTags": [
+        { "tag": "AI", "count": 28 },
+        { "tag": "chip", "count": 15 },
+        { "tag": "semiconductor", "count": 10 }
+      ]
+    }
+  }
+}
+```
+
+greeting 说明：
+- `nickname`: 用户昵称，未登录返回 "Guest"
+- `profileTag`: 从画像提取的标签（投资者类型 + 前两个关注领域）
+- `marketStatus`: 基于最近24h情报情感分布生成的一句话
+
+marketOverview 说明：
+- `sentimentIndex`: 情绪指数 0-100（positive占比 * 100）
+- `sentimentLabel`: Bullish(>=70) / Mixed(>=40) / Bearish(<40)
+- `stockUp/Down/Flat`: 行情涨跌平统计
+- `avgChangePercent`: 平均涨跌幅
+- `hotTags`: 最近24h情报中出现最多的标签 Top 10
+
+---
+
 ## 二、用户画像模块 `/api/profile`
 
 ### 2.1 GET /api/profile — 获取简易画像
@@ -533,7 +590,6 @@ credibilityLevel: `authoritative`(>=0.8) | `normal`(>=0.5) | `questionable`(<0.5
 
 | 交互稿页面 | 需要的接口 | 说明 |
 |-----------|-----------|------|
-| 首页上半部分 | GET /api/home | 问候栏 + 快速操作 + 市场概览 |
 | 市场洞察页 | GET /api/insight/overview | 市场情绪指数 + 趋势图 |
 | 市场洞察页 | GET /api/insight/sectors | 行业热度榜 |
 | 市场洞察页 | GET /api/insight/events | 热门事件时间轴 |
