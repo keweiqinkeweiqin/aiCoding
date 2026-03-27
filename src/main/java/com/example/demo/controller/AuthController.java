@@ -5,14 +5,13 @@ import com.example.demo.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * Auth: phone + password login.
- * If phone not registered, auto-register on first login.
+ * Auth: phone login, no password.
+ * Auto-register if phone not exists.
+ * Just stores user info + profile.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -25,91 +24,65 @@ public class AuthController {
     }
 
     /**
-     * Login (auto-register if phone not exists)
-     * POST /api/auth/login
-     * Body: {"phone":"13800138000","password":"xxx"}
+     * Login by phone (auto-register if new)
+     * POST /api/auth/login  {"phone":"13800138000"}
      */
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, String> body) {
         String phone = body.get("phone");
-        String password = body.get("password");
-
-        if (phone == null || phone.isBlank() || password == null || password.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "code", 400, "message", "phone and password required"));
+        if (phone == null || phone.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("code", 400, "message", "phone required"));
         }
 
-        String hash = hashPassword(password);
         var existing = userRepository.findByPhone(phone);
-
         if (existing.isPresent()) {
-            // Login: verify password
             User user = existing.get();
-            if (!hash.equals(user.getPasswordHash())) {
-                return ResponseEntity.status(401).body(Map.of(
-                        "code", 401, "message", "wrong password"));
-            }
             user.setLastLoginAt(LocalDateTime.now());
             userRepository.save(user);
-            return ResponseEntity.ok(Map.of(
-                    "code", 200,
-                    "message", "login success",
-                    "data", Map.of(
-                            "userId", user.getId(),
-                            "phone", user.getPhone(),
-                            "nickname", user.getNickname() != null ? user.getNickname() : "",
-                            "isNew", false
-                    )
-            ));
-        } else {
-            // Auto-register
-            User user = new User();
-            user.setPhone(phone);
-            user.setPasswordHash(hash);
-            user.setNickname("user_" + phone.substring(phone.length() - 4));
-            user.setLastLoginAt(LocalDateTime.now());
-            userRepository.save(user);
-            return ResponseEntity.ok(Map.of(
-                    "code", 200,
-                    "message", "register and login success",
-                    "data", Map.of(
-                            "userId", user.getId(),
-                            "phone", user.getPhone(),
-                            "nickname", user.getNickname(),
-                            "isNew", true
-                    )
-            ));
+            return ResponseEntity.ok(Map.of("code", 200, "data", Map.of(
+                    "userId", user.getId(),
+                    "phone", user.getPhone(),
+                    "nickname", user.getNickname() != null ? user.getNickname() : "",
+                    "isNew", false)));
         }
+
+        // Auto-register
+        User user = new User();
+        user.setPhone(phone);
+        user.setNickname(body.getOrDefault("nickname", "user_" + phone.substring(phone.length() - 4)));
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+        return ResponseEntity.ok(Map.of("code", 200, "data", Map.of(
+                "userId", user.getId(),
+                "phone", user.getPhone(),
+                "nickname", user.getNickname(),
+                "isNew", true)));
     }
 
-    /** Get current user info */
+    /** Update nickname */
+    @PutMapping("/me")
+    public ResponseEntity<Map<String, Object>> updateMe(
+            @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId,
+            @RequestBody Map<String, String> body) {
+        var user = userRepository.findById(userId);
+        if (user.isEmpty()) return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));
+        User u = user.get();
+        if (body.containsKey("nickname")) u.setNickname(body.get("nickname"));
+        userRepository.save(u);
+        return ResponseEntity.ok(Map.of("code", 200, "message", "updated"));
+    }
+
+    /** Get current user */
     @GetMapping("/me")
     public ResponseEntity<Map<String, Object>> me(
             @RequestHeader(value = "X-User-Id", defaultValue = "0") Long userId) {
-        if (userId == 0) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "message", "not logged in"));
-        }
+        if (userId == 0) return ResponseEntity.status(401).body(Map.of("code", 401, "message", "not logged in"));
         var user = userRepository.findById(userId);
-        if (user.isEmpty()) {
-            return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));
-        }
+        if (user.isEmpty()) return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));
         User u = user.get();
         return ResponseEntity.ok(Map.of("code", 200, "data", Map.of(
                 "userId", u.getId(),
                 "phone", u.getPhone(),
-                "nickname", u.getNickname() != null ? u.getNickname() : ""
-        )));
-    }
-
-    private String hashPassword(String password) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(password.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) sb.append(String.format("%02x", b));
-            return sb.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("hash failed", e);
-        }
+                "nickname", u.getNickname() != null ? u.getNickname() : "")));
     }
 }

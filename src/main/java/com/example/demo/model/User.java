@@ -17,9 +17,6 @@ public class User {
     @Column(length = 100)
     private String nickname;
 
-    @Column(length = 255, nullable = false)
-    private String passwordHash;
-
     private LocalDateTime createdAt;
     private LocalDateTime lastLoginAt;
 
@@ -36,8 +33,6 @@ public class User {
     public void setPhone(String phone) { this.phone = phone; }
     public String getNickname() { return nickname; }
     public void setNickname(String nickname) { this.nickname = nickname; }
-    public String getPasswordHash() { return passwordHash; }
-    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getLastLoginAt() { return lastLoginAt; }
