@@ -30,16 +30,16 @@ public class NewsCollectorService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final List<SourceConfig> RSS_SOURCES = List.of(
-        new SourceConfig("https://rsshub.chn.moe/36kr/information/web_news", "36Kr", "rss", "normal"),
-        new SourceConfig("https://rsshub.chn.moe/36kr/newsflashes", "36Kr-Flash", "rss", "normal"),
-        new SourceConfig("https://rsshub.chn.moe/cls/depth/1000", "CLS", "rss", "authoritative"),
-        new SourceConfig("https://rsshub.chn.moe/cls/telegraph", "CLS-Telegraph", "rss", "authoritative"),
-        new SourceConfig("https://rsshub.chn.moe/wallstreetcn/news/global", "WallStreetCN", "rss", "normal"),
-        new SourceConfig("https://rsshub.chn.moe/jin10", "Jin10", "rss", "normal"),
-        new SourceConfig("https://rsshub.chn.moe/gelonghui/live", "Gelonghui", "rss", "normal"),
-        new SourceConfig("https://rsshub.chn.moe/yicai/brief", "Yicai", "rss", "authoritative"),
-        new SourceConfig("https://rsshub.chn.moe/eastmoney/report/strategyreport", "EastMoney", "rss", "authoritative"),
-        new SourceConfig("https://rsshub.chn.moe/ithome/tag/AI", "ITHome-AI", "rss", "normal")
+        new SourceConfig("https://rsshub.chn.moe/36kr/information/web_news", "36Kr资讯", "rss", "normal"),
+        new SourceConfig("https://rsshub.chn.moe/36kr/newsflashes", "36Kr快讯", "rss", "normal"),
+        new SourceConfig("https://rsshub.chn.moe/cls/depth/1000", "财联社", "rss", "authoritative"),
+        new SourceConfig("https://rsshub.chn.moe/cls/telegraph", "财联社电报", "rss", "authoritative"),
+        new SourceConfig("https://rsshub.chn.moe/wallstreetcn/news/global", "华尔街见闻", "rss", "normal"),
+        new SourceConfig("https://rsshub.chn.moe/jin10", "金十数据", "rss", "normal"),
+        new SourceConfig("https://rsshub.chn.moe/gelonghui/live", "格隆汇", "rss", "normal"),
+        new SourceConfig("https://rsshub.chn.moe/yicai/brief", "第一财经", "rss", "authoritative"),
+        new SourceConfig("https://rsshub.chn.moe/eastmoney/report/strategyreport", "东方财富研报", "rss", "authoritative"),
+        new SourceConfig("https://rsshub.chn.moe/ithome/tag/AI", "IT之家AI", "rss", "normal")
     );
 
     private static final String LLM_SYSTEM = "You are an AI tech finance analyst. Analyze news and extract structured info. Return strict JSON only.";

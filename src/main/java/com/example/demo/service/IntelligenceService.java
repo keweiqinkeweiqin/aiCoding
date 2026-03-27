@@ -66,8 +66,20 @@ public class IntelligenceService {
             intelligenceRepository.save(intel);
         }
 
-        // 构建来源列表
-        List<SourceInfo> sources = articles.stream().map(a -> new SourceInfo(
+        // 构建来源列表（按来源名去重，每个来源取置信度最高的文章）
+        Map<String, NewsArticle> bestBySource = new LinkedHashMap<>();
+        for (NewsArticle a : articles) {
+            String name = a.getSourceName() != null ? a.getSourceName() : "unknown";
+            NewsArticle existing = bestBySource.get(name);
+            if (existing == null) {
+                bestBySource.put(name, a);
+            } else {
+                double sCur = a.getCredibilityScore() != null ? a.getCredibilityScore() : 0;
+                double sEx = existing.getCredibilityScore() != null ? existing.getCredibilityScore() : 0;
+                if (sCur > sEx) bestBySource.put(name, a);
+            }
+        }
+        List<SourceInfo> sources = bestBySource.values().stream().map(a -> new SourceInfo(
                 a.getId(),
                 a.getSourceName(),
                 mapCredibilityTag(a.getCredibilityLevel()),

@@ -241,7 +241,7 @@ public class EventClusterService {
 
         if (articles.isEmpty()) return;
 
-        // 来源数 = 不同来源名的数量
+        // sourceCount = distinct source names
         long sourceCount = articles.stream()
                 .map(NewsArticle::getSourceName).distinct().count();
         intel.setSourceCount((int) sourceCount);
