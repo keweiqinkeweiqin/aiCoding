@@ -88,9 +88,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-
 .toast.error{background:#ef4444}
 </style>
 <script>
-const TOKEN = localStorage.getItem('token');
-if (!TOKEN) window.location.href = '/login.html';
-const HEADERS = {'Content-Type':'application/json','Authorization':'Bearer '+TOKEN};
+const USER_ID = localStorage.getItem('userId');
+if (!USER_ID) window.location.href = '/login.html';
+const HEADERS = {'Content-Type':'application/json','X-User-Id': USER_ID};
 let state = {investorType:null,investmentCycle:null,focusAreas:[],holdings:[],focusOptions:[]};
 
 async function init(){
