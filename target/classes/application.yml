@@ -28,7 +28,6 @@ spring:
         options:
           model: GPT-5.4
           temperature: 0.3
-          max-tokens: 2000
       embedding:
         enabled: false
 
