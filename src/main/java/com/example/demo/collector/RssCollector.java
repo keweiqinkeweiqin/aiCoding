@@ -21,15 +21,12 @@ public class RssCollector {
         this.restTemplate = restTemplate;
     }
 
-    /**
-     * 从RSS源采集新闻，返回简单的标题+内容+链接
-     */
     public List<RssItem> collect(String rssUrl, String sourceName) {
         List<RssItem> items = new ArrayList<>();
         try {
             String xml = restTemplate.getForObject(rssUrl, String.class);
             if (xml == null || xml.isBlank()) {
-                log.warn("RSS源返回空内容: {}", rssUrl);
+                log.warn("RSS source returned empty: {}", rssUrl);
                 return items;
             }
 
@@ -37,7 +34,6 @@ public class RssCollector {
                     .newDocumentBuilder()
                     .parse(new InputSource(new StringReader(xml)));
 
-            // 兼容 RSS 2.0 (item) 和 Atom (entry)
             NodeList nodes = doc.getElementsByTagName("item");
             if (nodes.getLength() == 0) {
                 nodes = doc.getElementsByTagName("entry");
@@ -53,9 +49,9 @@ public class RssCollector {
                     items.add(new RssItem(title.trim(), content != null ? content.trim() : "", link, sourceName));
                 }
             }
-            log.info("从 {} 采集到 {} 条新闻", sourceName, items.size());
+            log.info("Collected {} items from {}", items.size(), sourceName);
         } catch (Exception e) {
-            log.error("采集RSS失败 [{}]: {}", sourceName, e.getMessage());
+            log.error("RSS collect failed [{}]: {}", sourceName, e.getMessage());
         }
         return items;
     }
@@ -77,12 +73,11 @@ public class RssCollector {
     }
 
     private String getLink(Element parent) {
-        // RSS 2.0: <link>url</link>
         NodeList links = parent.getElementsByTagName("link");
         for (int i = 0; i < links.getLength(); i++) {
             Node node = links.item(i);
-            // Atom: <link href="url"/>
-            if (node instanceof Element el) {
+            if (node instanceof Element) {
+                Element el = (Element) node;
                 String href = el.getAttribute("href");
                 if (href != null && !href.isBlank()) return href;
                 String text = el.getTextContent();

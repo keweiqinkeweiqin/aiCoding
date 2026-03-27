@@ -16,10 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * 智能问答：用户输入 → Embedding语义检索相关新闻 → LLM推理生成分析
- * 使用 Qwen3.5-flash 做问答（比GPT-5.4快很多）
- */
 @Service
 public class SmartQueryService {
 
@@ -44,7 +40,6 @@ public class SmartQueryService {
     }
 
     public QueryResult query(String userQuestion) {
-        // 1. 语义检索最相关的15篇新闻
         List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 15);
         List<NewsArticle> relatedArticles = articleIds.stream()
                 .map(newsArticleRepository::findById)
@@ -53,10 +48,9 @@ public class SmartQueryService {
                 .toList();
 
         if (relatedArticles.isEmpty()) {
-            return new QueryResult("暂无相关新闻数据，请先采集新闻。", List.of(), 0);
+            return new QueryResult("\u6682\u65e0\u76f8\u5173\u65b0\u95fb\u6570\u636e\uff0c\u8bf7\u5148\u91c7\u96c6\u65b0\u95fb\u3002", List.of(), 0);
         }
 
-        // 2. 组装上下文（优先用摘要，节省token让更多文章进入上下文）
         String newsContext = relatedArticles.stream()
                 .map(a -> {
                     String body = a.getSummary() != null && !a.getSummary().isBlank()
@@ -64,7 +58,7 @@ public class SmartQueryService {
                             : (a.getContent() != null && a.getContent().length() > 200
                                     ? a.getContent().substring(0, 200) + "..."
                                     : a.getContent());
-                    return String.format("[%s|%s] %s — %s",
+                    return String.format("[%s|%s] %s \u2014 %s",
                             a.getSourceName(),
                             a.getCredibilityLevel() != null ? a.getCredibilityLevel() : "unknown",
                             a.getTitle(),
@@ -72,37 +66,26 @@ public class SmartQueryService {
                 })
                 .collect(Collectors.joining("\n"));
 
-        // 3. 调LLM推理
-        String systemPrompt = """
-                你是「华尔街之眼」AI投研助手，专注AI与科技投资领域。
-                基于提供的新闻数据回答用户问题。要求：
-                1. 标注信息来源及可信度
-                2. 区分事实与观点
-                3. 给出投资相关的分析和建议
-                4. 如果信息不足，明确说明
-                """;
+        String systemPrompt = "\u4f60\u662f\u300c\u534e\u5c14\u8857\u4e4b\u773c\u300dAI\u6295\u7814\u52a9\u624b\uff0c\u4e13\u6ce8AI\u4e0e\u79d1\u6280\u6295\u8d44\u9886\u57df\u3002\n"
+                + "\u57fa\u4e8e\u63d0\u4f9b\u7684\u65b0\u95fb\u6570\u636e\u56de\u7b54\u7528\u6237\u95ee\u9898\u3002\u8981\u6c42\uff1a\n"
+                + "1. \u6807\u6ce8\u4fe1\u606f\u6765\u6e90\u53ca\u53ef\u4fe1\u5ea6\n"
+                + "2. \u533a\u5206\u4e8b\u5b9e\u4e0e\u89c2\u70b9\n"
+                + "3. \u7ed9\u51fa\u6295\u8d44\u76f8\u5173\u7684\u5206\u6790\u548c\u5efa\u8bae\n"
+                + "4. \u5982\u679c\u4fe1\u606f\u4e0d\u8db3\uff0c\u660e\u786e\u8bf4\u660e";
 
-        String userPrompt = String.format("""
-                ## 相关新闻（共%d条，按语义相关度排序）
-                
-                %s
-                
-                ## 用户问题
-                %s
-                
-                请基于以上新闻数据进行分析和回答。
-                """, relatedArticles.size(), newsContext, userQuestion);
+        String userPrompt = String.format(
+                "## \u76f8\u5173\u65b0\u95fb\uff08\u5171%d\u6761\uff0c\u6309\u8bed\u4e49\u76f8\u5173\u5ea6\u6392\u5e8f\uff09\n\n%s\n\n## \u7528\u6237\u95ee\u9898\n%s\n\n\u8bf7\u57fa\u4e8e\u4ee5\u4e0a\u65b0\u95fb\u6570\u636e\u8fdb\u884c\u5206\u6790\u548c\u56de\u7b54\u3002",
+                relatedArticles.size(), newsContext, userQuestion);
 
         try {
             String answer = callLlm(systemPrompt, userPrompt);
             return new QueryResult(answer, relatedArticles, relatedArticles.size());
         } catch (Exception e) {
-            log.error("LLM推理失败: {}", e.getMessage());
-            return new QueryResult("AI分析服务暂时不可用: " + e.getMessage(), relatedArticles, relatedArticles.size());
+            log.error("LLM query failed: {}", e.getMessage());
+            return new QueryResult("AI\u5206\u6790\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528: " + e.getMessage(), relatedArticles, relatedArticles.size());
         }
     }
 
-    /** 使用 Qwen3.5-flash 做问答（快） */
     private String callLlm(String systemPrompt, String userPrompt) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

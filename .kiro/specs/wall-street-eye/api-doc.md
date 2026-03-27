@@ -4,6 +4,25 @@
 
 ---
 
+## 〇、核心概念：情报 vs 新闻
+
+本系统中「情报」和「新闻」是两个不同层级的概念：
+
+| 概念 | 说明 | 对应实体 |
+|------|------|---------|
+| 新闻 (NewsArticle) | 单条原始新闻，来自某一个信息源 | `news_articles` 表（已有） |
+| 情报 (Intelligence) | 多条报道同一事件的新闻聚合而成 | `intelligences` 表（🆕 新增） |
+
+关系：`Intelligence 1 : N NewsArticle`
+
+- 采集到的每条新闻仍然存入 `news_articles`
+- 采集后通过 SimHash 标题聚类（汉明距离 ≤ 10），将报道同一事件的新闻归入同一条情报
+- 首页「情报列表」查的是 `Intelligence`，不是直接查 `NewsArticle`
+- 情报详情页展示聚合后的分析内容 + 多个信息来源（每个来源对应一条 NewsArticle）
+- 如果某条新闻没有匹配到其他来源，则单独生成一条情报（1:1）
+
+---
+
 ## 一、通用约定
 
 | 项目 | 说明 |
@@ -170,12 +189,13 @@ Response (200):
 }
 ```
 
-### 3.3 获取情报列表（已有 `GET /api/news`，需扩展字段）
+### 3.3 获取情报列表（🆕 需新增）
 
-> 对应交互稿「情报列表」：每条卡片含优先级标签、来源、时间、标题、摘要、影响分析、置信度、来源数
+> 对应交互稿「情报列表」：查询的是聚合后的情报（Intelligence），不是原始新闻
+> 每条情报卡片含：优先级标签、主来源、时间、标题、摘要、影响分析、置信度、来源数
 
 ```
-GET /api/news?hours=24&page=0&size=20
+GET /api/intelligences?hours=24&page=0&size=20
 ```
 
 Response (200):
@@ -187,31 +207,37 @@ Response (200):
       {
         "id": 1,
         "priority": "high",
-        "sourceName": "财联社",
-        "sourceType": "rss",
-        "publishedAt": "2026-03-27T09:15:00",
-        "title": "英伟达发布新一代AI芯片B300，性能提升4倍",
-        "summary": "英伟达在GTC大会上发布B300芯片，采用台积电3nm工艺...",
-        "impactAnalysis": {
-          "icon": "💡",
-          "title": "AI算力格局或将重塑",
-          "content": "B300芯片的发布将加速AI大模型训练效率，利好算力产业链..."
-        },
+        "title": "美国商务部宣布最新AI芯片出口管制新政",
+        "summary": "新规将进一步限制高性能AI芯片对中国市场的出口，涉及H100、A100等多款NVIDIA主力产品...",
+        "primarySource": "SEC Filing",
         "credibilityLevel": "authoritative",
-        "credibilityScore": 0.87,
-        "crossSourceCount": 3,
-        "sentiment": "positive",
-        "sentimentScore": 0.85,
-        "relatedStocks": "NVDA,TSM",
-        "tags": "AI,芯片,英伟达"
+        "credibilityScore": 0.95,
+        "sourceCount": 3,
+        "sentiment": "negative",
+        "sentimentScore": 0.15,
+        "relatedStocks": "NVDA,AMD,TSM",
+        "tags": "AI,芯片,出口管制",
+        "impactBrief": {
+          "icon": "💡",
+          "title": "对你的影响",
+          "content": "你持有的NVIDIA股票预计受此影响短期波动幅度约±8%，建议关注国内AI芯片替代标的。"
+        },
+        "latestArticleTime": "2026-03-27T09:15:00",
+        "createdAt": "2026-03-27T09:20:00"
       }
     ],
-    "totalElements": 156,
-    "totalPages": 8,
+    "totalElements": 56,
+    "totalPages": 3,
     "currentPage": 0
   }
 }
 ```
+
+说明：
+- `sourceCount` = 该情报聚合了多少条不同来源的新闻
+- `primarySource` = 置信度最高的那条新闻的来源名
+- `impactBrief` = 列表页的简化影响分析（基于用户持仓模板匹配，不调 LLM）
+- `latestArticleTime` = 聚合的新闻中最新的一条的时间
 
 ---
 
@@ -222,8 +248,10 @@ Response (200):
 
 ### 4.1 获取情报详情（🆕 需新增）
 
+> 情报详情 = 聚合后的分析内容 + 多个信息来源（每个来源是一条 NewsArticle）
+
 ```
-GET /api/news/{id}
+GET /api/intelligences/{id}
 ```
 
 Response (200):
@@ -234,24 +262,33 @@ Response (200):
     "id": 1,
     "priority": "high",
     "credibilityLevel": "authoritative",
-    "credibilityScore": 0.87,
-    "crossSourceCount": 3,
-    "title": "英伟达发布新一代AI芯片B300，性能提升4倍",
-    "publishedAt": "2026-03-27T09:15:00",
+    "credibilityScore": 0.95,
+    "sourceCount": 3,
+    "title": "美国商务部宣布最新AI芯片出口管制新政",
+    "latestArticleTime": "2026-03-27T09:15:00",
     "readTime": "约3分钟",
-    "sourceName": "财联社",
-    "content": "正文HTML内容...",
+    "primarySource": "SEC Filing",
+    "content": "LLM基于多条新闻综合生成的分析正文...",
     "sources": [
       {
-        "name": "财联社",
+        "articleId": 101,
+        "sourceName": "美国商务部官方公告",
         "credibilityTag": "权威",
-        "title": "英伟达GTC大会：B300芯片正式发布",
+        "title": "Bureau of Industry and Security: New AI Chip Export Controls",
         "sourceUrl": "https://..."
       },
       {
-        "name": "华尔街见闻",
-        "credibilityTag": "可信",
-        "title": "英伟达新芯片B300性能跃升",
+        "articleId": 102,
+        "sourceName": "NVIDIA SEC 8-K 文件",
+        "credibilityTag": "权威",
+        "title": "NVIDIA Corporation Form 8-K: Export Regulation Impact",
+        "sourceUrl": "https://..."
+      },
+      {
+        "articleId": 103,
+        "sourceName": "路透社独家报道",
+        "credibilityTag": "一般",
+        "title": "Exclusive: US tightens AI chip export curbs targeting China",
         "sourceUrl": "https://..."
       }
     ],
@@ -268,9 +305,9 @@ Response (200):
           "level": "高影响",
           "title": "对您持仓的直接影响",
           "details": [
-            "您持有的NVDA可能受益于新品发布",
-            "短期股价或有波动，建议关注量能变化",
-            "中长期看好AI算力需求增长逻辑"
+            "您持有的NVDA可能受此影响短期波动±8%",
+            "数据中心业务中国区收入可能下降15-20%",
+            "建议关注国内AI芯片替代标的"
           ]
         },
         {
@@ -291,13 +328,14 @@ Response (200):
         "3. 留意国内芯片板块的联动反应"
       ]
     },
-    "relatedNews": [
+    "relatedIntelligences": [
       {
         "id": 5,
         "title": "台积电3nm产能满载，AI芯片需求旺盛",
         "summary": "台积电最新财报显示...",
-        "sourceName": "36Kr",
-        "publishedAt": "2026-03-26T14:00:00",
+        "primarySource": "36Kr",
+        "sourceCount": 2,
+        "latestArticleTime": "2026-03-26T14:00:00",
         "thumbnailUrl": null
       }
     ]
@@ -305,12 +343,18 @@ Response (200):
 }
 ```
 
+说明：
+- `sources` 数组 = 聚合到这条情报下的所有原始新闻，每条可「查看原文」
+- `content` = LLM 基于多条新闻综合生成的分析文章（不是某一条新闻的原文）
+- `relatedIntelligences` = 语义相似的其他情报（不是新闻）
+- `personalizedImpact` = 基于用户画像的个性化影响分析（调 LLM 生成）
+
 ### 4.2 情报反馈（认同/不认同）（🆕 需新增）
 
 > 对应交互稿底部「认同/不认同」按钮
 
 ```
-POST /api/news/{id}/feedback
+POST /api/intelligences/{id}/feedback
 ```
 
 Request:
@@ -324,7 +368,7 @@ type 枚举: `agree` | `disagree`
 ### 4.3 收藏/取消收藏（🆕 需新增）
 
 ```
-POST /api/news/{id}/favorite
+POST /api/intelligences/{id}/favorite
 ```
 
 Request:
@@ -340,7 +384,7 @@ action 枚举: `add` | `remove`
 > 对应交互稿「操作建议」区域的「生成完整报告」按钮
 
 ```
-POST /api/news/{id}/report
+POST /api/intelligences/{id}/report
 ```
 
 Response (200):
@@ -484,9 +528,9 @@ Response (200):
 > 交互稿页面：华尔街之眼-搜索页面
 > 包含：搜索框、搜索历史、热门搜索、搜索结果列表
 
-### 6.1 搜索情报（已有 `POST /api/query`，需扩展）
+### 6.1 搜索情报（🆕 需新增）
 
-> 对应交互稿搜索结果列表，复用智能问答接口但增加列表模式
+> 对应交互稿搜索结果列表，搜索结果返回的是情报（Intelligence），不是原始新闻
 
 ```
 POST /api/search
@@ -512,13 +556,13 @@ Response (200):
       {
         "id": 1,
         "priority": "high",
-        "sourceName": "财联社",
-        "publishedAt": "2026-03-27T09:15:00",
-        "title": "英伟达发布新一代AI芯片B300",
-        "summary": "英伟达在GTC大会上发布B300芯片...",
+        "primarySource": "SEC Filing",
+        "latestArticleTime": "2026-03-27T09:15:00",
+        "title": "美国商务部宣布最新AI芯片出口管制新政",
+        "summary": "新规将进一步限制高性能AI芯片对中国市场的出口...",
         "credibilityLevel": "authoritative",
-        "credibilityScore": 0.87,
-        "crossSourceCount": 3
+        "credibilityScore": 0.95,
+        "sourceCount": 3
       }
     ],
     "totalElements": 42
@@ -784,22 +828,22 @@ GET /api/logs?count=50
 
 ## 十、接口状态汇总
 
-| 模块 | 接口 | 状态 |
-|------|------|------|
-| 认证 | 注册/登录/OAuth/退出 | 🆕 需新增 |
-| 首页 | 首页聚合数据 | 🆕 需新增 |
-| 首页 | 市场概览 | 🔄 需扩展 |
-| 首页 | 情报列表 | 🔄 需扩展 |
-| 详情 | 情报详情 | 🆕 需新增 |
-| 详情 | 反馈/收藏/报告 | 🆕 需新增 |
-| 洞察 | 市场洞察聚合 | 🆕 需新增 |
-| 洞察 | 行业热度榜 | 🆕 需新增 |
-| 洞察 | 热门事件时间轴 | 🆕 需新增 |
-| 洞察 | 热门研报 | 🆕 需新增 |
-| 搜索 | 搜索/历史/热门 | 🆕 需新增 |
-| 画像 | 用户画像CRUD | 🆕 需新增 |
-| 个人 | 个人中心/收藏/历史 | 🆕 需新增 |
-| 采集 | 新闻采集 | ✅ 已有 |
-| 采集 | 行情采集 | ✅ 已有 |
-| 问答 | 智能问答 | ✅ 已有 |
-| 系统 | 状态/日志 | ✅ 已有 |
+| 模块 | 接口 | 路径 | 状态 |
+|------|------|------|------|
+| 认证 | 注册/登录/OAuth/退出 | `/api/auth/*` | 🆕 需新增 |
+| 首页 | 首页聚合数据 | `GET /api/home` | 🆕 需新增 |
+| 首页 | 市场概览 | `GET /api/market/overview` | 🆕 需新增 |
+| 首页 | 情报列表 | `GET /api/intelligences` | 🆕 需新增 |
+| 详情 | 情报详情 | `GET /api/intelligences/{id}` | 🆕 需新增 |
+| 详情 | 反馈/收藏/报告 | `POST /api/intelligences/{id}/*` | 🆕 需新增 |
+| 洞察 | 市场洞察聚合 | `GET /api/insight/overview` | 🆕 需新增 |
+| 洞察 | 行业热度榜 | `GET /api/insight/sectors` | 🆕 需新增 |
+| 洞察 | 热门事件时间轴 | `GET /api/insight/events` | 🆕 需新增 |
+| 洞察 | 热门研报 | `GET /api/insight/reports` | 🆕 需新增 |
+| 搜索 | 搜索/历史/热门 | `/api/search/*` | 🆕 需新增 |
+| 画像 | 用户画像CRUD | `/api/profile/*` | 🆕 需新增 |
+| 个人 | 个人中心/收藏/历史 | `/api/user/*` | 🆕 需新增 |
+| 采集 | 新闻采集 | `POST /api/news/collect` | ✅ 已有（需扩展：采集后触发聚类） |
+| 采集 | 行情采集 | `POST /api/market/collect` | ✅ 已有 |
+| 问答 | 智能问答 | `POST /api/query` | ✅ 已有 |
+| 系统 | 状态/日志 | `GET /api/stats`, `GET /api/logs` | ✅ 已有 |
