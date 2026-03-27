@@ -1,11 +1,13 @@
 package com.example.demo.controller;
 
 import com.example.demo.collector.MarketDataCollector;
+import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.MarketData;
 import com.example.demo.model.NewsArticle;
 import com.example.demo.repository.MarketDataRepository;
 import com.example.demo.repository.NewsArticleRepository;
 import com.example.demo.service.NewsCollectorService;
+import com.example.demo.service.SmartQueryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,15 +23,21 @@ public class NewsController {
     private final MarketDataCollector marketDataCollector;
     private final NewsArticleRepository newsArticleRepository;
     private final MarketDataRepository marketDataRepository;
+    private final SmartQueryService smartQueryService;
+    private final VectorSearchService vectorSearchService;
 
     public NewsController(NewsCollectorService newsCollectorService,
                           MarketDataCollector marketDataCollector,
                           NewsArticleRepository newsArticleRepository,
-                          MarketDataRepository marketDataRepository) {
+                          MarketDataRepository marketDataRepository,
+                          SmartQueryService smartQueryService,
+                          VectorSearchService vectorSearchService) {
         this.newsCollectorService = newsCollectorService;
         this.marketDataCollector = marketDataCollector;
         this.newsArticleRepository = newsArticleRepository;
         this.marketDataRepository = marketDataRepository;
+        this.smartQueryService = smartQueryService;
+        this.vectorSearchService = vectorSearchService;
     }
 
     /** 手动触发新闻采集 */
@@ -65,5 +73,36 @@ public class NewsController {
     @GetMapping("/market")
     public List<MarketData> listMarket() {
         return marketDataRepository.findAll();
+    }
+
+    /** 智能问答：语义检索 + LLM推理 */
+    @PostMapping("/query")
+    public ResponseEntity<Map<String, Object>> smartQuery(@RequestBody Map<String, String> body) {
+        String question = body.get("question");
+        if (question == null || question.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "question不能为空"));
+        }
+        var result = smartQueryService.query(question);
+        return ResponseEntity.ok(Map.of(
+                "answer", result.answer(),
+                "matchedCount", result.matchedCount(),
+                "relatedNews", result.relatedNews().stream().map(n -> Map.of(
+                        "id", n.getId(),
+                        "title", n.getTitle(),
+                        "sourceName", n.getSourceName(),
+                        "credibilityLevel", n.getCredibilityLevel() != null ? n.getCredibilityLevel() : "unknown",
+                        "sourceUrl", n.getSourceUrl() != null ? n.getSourceUrl() : ""
+                )).toList()
+        ));
+    }
+
+    /** 系统状态 */
+    @GetMapping("/stats")
+    public Map<String, Object> stats() {
+        return Map.of(
+                "totalNews", newsArticleRepository.count(),
+                "totalMarket", marketDataRepository.count(),
+                "vectorCacheSize", vectorSearchService.cacheSize()
+        );
     }
 }

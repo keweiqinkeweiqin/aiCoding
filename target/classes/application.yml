@@ -19,20 +19,29 @@ spring:
       ddl-auto: update
     show-sql: false
 
-  # Spring AI - 暂时禁用，等key申请到再开启
+  # Spring AI - Chat（LLM文本生成）
   ai:
     openai:
-      api-key: ${HUANSHI_API_KEY:sk-placeholder}
+      api-key: sk-wpKbzykan-uFR6HCgW8rfwyBCGd-J0N2efi5B3B7qk4
       base-url: https://pre-aibrain-large-model-engine.hellobike.cn
       chat:
-        enabled: false
         options:
-          model: Deepseek-V3-0324
+          model: GPT-5.4
           temperature: 0.3
+          max-tokens: 2000
       embedding:
         enabled: false
-        options:
-          model: Doubao-Embedding-large-0515
 
 server:
   port: 8080
+
+# Embedding 单独配置（key不同）
+embedding:
+  api-url: https://pre-aibrain-large-model-engine.hellobike.cn/v1/embeddings
+  api-key: sk-4N0tr8LQDwpHoQM5zu9SQl84kPBl3aLTz3HuMBu6MtQ
+  model: Qwen-text-embedding-v4
+
+# 数据采集配置
+collector:
+  market:
+    licence: ${MAIRUI_LICENCE:}

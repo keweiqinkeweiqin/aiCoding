@@ -1,16 +1,15 @@
 package com.example.demo.service;
 
 import com.example.demo.collector.RssCollector;
+import com.example.demo.embedding.EmbeddingClient;
+import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.NewsArticle;
 import com.example.demo.repository.NewsArticleRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -21,8 +20,10 @@ public class NewsCollectorService {
     private final RssCollector rssCollector;
     private final DeduplicationService deduplicationService;
     private final NewsArticleRepository newsArticleRepository;
+    private final EmbeddingClient embeddingClient;
+    private final VectorSearchService vectorSearchService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // RSS源配置
     private static final List<SourceConfig> RSS_SOURCES = List.of(
             new SourceConfig("https://rsshub.chn.moe/36kr/information/web_news", "36Kr", "rss", "normal"),
             new SourceConfig("https://rsshub.chn.moe/cls/depth/1000", "财联社", "rss", "authoritative"),
@@ -31,10 +32,14 @@ public class NewsCollectorService {
 
     public NewsCollectorService(RssCollector rssCollector,
                                  DeduplicationService deduplicationService,
-                                 NewsArticleRepository newsArticleRepository) {
+                                 NewsArticleRepository newsArticleRepository,
+                                 EmbeddingClient embeddingClient,
+                                 VectorSearchService vectorSearchService) {
         this.rssCollector = rssCollector;
         this.deduplicationService = deduplicationService;
         this.newsArticleRepository = newsArticleRepository;
+        this.embeddingClient = embeddingClient;
+        this.vectorSearchService = vectorSearchService;
     }
 
     /**
@@ -77,6 +82,22 @@ public class NewsCollectorService {
                             : plainContent);
 
                     newsArticleRepository.save(article);
+
+                    // 生成Embedding并缓存
+                    try {
+                        String textForEmbed = article.getTitle();
+                        float[] vector = embeddingClient.embed(textForEmbed);
+                        if (vector.length > 0) {
+                            List<Float> floatList = new java.util.ArrayList<>();
+                            for (float v : vector) floatList.add(v);
+                            article.setEmbeddingJson(objectMapper.writeValueAsString(floatList));
+                            newsArticleRepository.save(article);
+                            vectorSearchService.addVector(article.getId(), vector);
+                        }
+                    } catch (Exception e) {
+                        log.warn("Embedding生成失败[{}]: {}", article.getTitle(), e.getMessage());
+                    }
+
                     totalStored++;
                 }
             } catch (Exception e) {
