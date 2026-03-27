@@ -26,7 +26,7 @@ spring:
       base-url: https://pre-aibrain-large-model-engine.hellobike.cn
       chat:
         options:
-          model: DeepSeek-V3.2
+          model: GPT-5.4
           temperature: 0.3
           max-tokens: 2000
       embedding:
