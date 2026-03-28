@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 
 @Configuration
-// @EnableScheduling  // Disabled: use debug panel to trigger manually
+@EnableScheduling
 public class SchedulerConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SchedulerConfig.class);

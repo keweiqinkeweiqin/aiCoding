@@ -161,11 +161,10 @@ public class IntelligenceController {
                     }).toList();
             data.put("relatedIntelligences", related);
 
-            // 个性化影响分析（画像 + 个股影响 + 操作建议）
+            // 个性化影响分析（带超时保护的LLM调用）
             if (userId > 0) {
                 Map<String, Object> personalized = new LinkedHashMap<>();
 
-                // 1. 用户画像卡片
                 UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
                 if (profile != null) {
                     Map<String, Object> profileCard = new LinkedHashMap<>();
@@ -180,14 +179,24 @@ public class IntelligenceController {
                     personalized.put("userProfile", null);
                 }
 
-                // 2. LLM 生成的个股影响 + 操作建议
+                // LLM分析：带15秒超时保护
+                final Long fUserId = userId;
+                final Long fId = id;
                 try {
-                    Map<String, Object> analysis = analysisService.generateAnalysis(userId, id);
+                    var future = java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                            analysisService.generateAnalysis(fUserId, fId));
+                    Map<String, Object> analysis = future.get(15, java.util.concurrent.TimeUnit.SECONDS);
                     personalized.put("analysis", analysis.get("analysis"));
                     personalized.put("impacts", analysis.get("impacts"));
                     personalized.put("suggestion", analysis.get("suggestion"));
                     personalized.put("risks", analysis.get("risks"));
                     personalized.put("userContext", analysis.get("userContext"));
+                } catch (java.util.concurrent.TimeoutException e) {
+                    log.warn("LLM分析超时(15s) for intel {}", id);
+                    personalized.put("analysis", "分析超时，请稍后重试");
+                    personalized.put("impacts", List.of());
+                    personalized.put("suggestion", null);
+                    personalized.put("risks", List.of());
                 } catch (Exception e) {
                     log.warn("Analysis failed for intel {}: {}", id, e.getMessage());
                     personalized.put("analysis", null);

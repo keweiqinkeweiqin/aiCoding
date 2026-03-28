@@ -44,10 +44,10 @@ public class HomeController {
 
         // 2. Quick actions
         data.put("quickActions", List.of(
-                Map.of("id", "collect", "name", "Collect News", "icon", "refresh"),
-                Map.of("id", "query", "name", "Smart Q&A", "icon", "chat"),
-                Map.of("id", "market", "name", "Market Data", "icon", "chart"),
-                Map.of("id", "profile", "name", "My Profile", "icon", "user")
+                Map.of("id", "collect", "name", "采集新闻", "icon", "refresh"),
+                Map.of("id", "query", "name", "智能问答", "icon", "chat"),
+                Map.of("id", "market", "name", "行情数据", "icon", "chart"),
+                Map.of("id", "profile", "name", "我的画像", "icon", "user")
         ));
 
         // 3. Market overview
@@ -58,21 +58,21 @@ public class HomeController {
 
     private Map<String, Object> buildGreeting(Long userId) {
         Map<String, Object> greeting = new LinkedHashMap<>();
-        String nickname = "Guest";
+        String nickname = "访客";
         String profileTag = "";
 
         if (userId > 0) {
             User user = userRepository.findById(userId).orElse(null);
-            if (user != null) nickname = user.getNickname() != null ? user.getNickname() : "User";
+            if (user != null) nickname = user.getNickname() != null ? user.getNickname() : "用户";
 
             UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
             if (profile != null) {
                 List<String> tags = new ArrayList<>();
                 if (profile.getInvestorType() != null) {
                     String type = profile.getInvestorType();
-                    if ("growth".equals(type)) tags.add("Growth");
-                    else if ("balanced".equals(type)) tags.add("Balanced");
-                    else if ("conservative".equals(type)) tags.add("Conservative");
+                    if ("growth".equals(type)) tags.add("成长型");
+                    else if ("balanced".equals(type)) tags.add("均衡型");
+                    else if ("conservative".equals(type)) tags.add("保守型");
                 }
                 if (profile.getFocusAreas() != null && !profile.getFocusAreas().isBlank()) {
                     String[] areas = profile.getFocusAreas().split(",");
@@ -94,13 +94,13 @@ public class HomeController {
         long total = recent.size();
         String status;
         if (total == 0) {
-            status = "No recent data";
+            status = "暂无最新数据";
         } else if (pos > neg * 2) {
-            status = "Market sentiment is bullish, " + total + " intel tracked";
+            status = "市场情绪偏多，已追踪" + total + "条情报";
         } else if (neg > pos * 2) {
-            status = "Market sentiment is bearish, caution advised";
+            status = "市场情绪偏空，注意风险";
         } else {
-            status = "Market sentiment is mixed, " + total + " intel tracked";
+            status = "市场情绪中性，已追踪" + total + "条情报";
         }
         greeting.put("marketStatus", status);
 
@@ -119,9 +119,9 @@ public class HomeController {
 
         int sentimentIndex = total > 0 ? (int) Math.round((double) positive / total * 100) : 50;
         String sentimentLabel;
-        if (sentimentIndex >= 70) sentimentLabel = "Bullish";
-        else if (sentimentIndex >= 40) sentimentLabel = "Mixed";
-        else sentimentLabel = "Bearish";
+        if (sentimentIndex >= 70) sentimentLabel = "偏多";
+        else if (sentimentIndex >= 40) sentimentLabel = "中性";
+        else sentimentLabel = "偏空";
 
         overview.put("sentimentIndex", sentimentIndex);
         overview.put("sentimentLabel", sentimentLabel);

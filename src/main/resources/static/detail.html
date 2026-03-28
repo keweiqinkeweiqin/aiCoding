@@ -116,8 +116,8 @@ const headers = { 'X-User-Id': userId, 'Content-Type': 'application/json' };
 
 // Parallel load
 Promise.all([
-  fetch('/api/intelligences/' + intelId, { headers }).then(r => r.json()),
-  fetch('/api/profile', { headers }).then(r => r.json()).catch(() => null),
+  fetch('/api/intelligences/' + intelId + '?userId=' + userId, { headers }).then(r => r.json()),
+  fetch('/api/profile?userId=' + userId, { headers }).then(r => r.json()).catch(() => null),
   fetch('/api/intelligences/' + intelId + '/related?limit=5', { headers }).then(r => r.json()).catch(() => ({data:[]}))
 ]).then(([intelRes, profileRes, relatedRes]) => {
   const intel = intelRes.data || intelRes;
@@ -125,7 +125,14 @@ Promise.all([
   renderSources(intel.sources || []);
   renderContent(intel.content);
   renderProfile(profileRes);
-  renderAnalysisArea();
+  // 如果详情接口已返回个性化分析，直接渲染；否则显示生成按钮
+  if (intel.personalizedAnalysis && (intel.personalizedAnalysis.analysis || (intel.personalizedAnalysis.impacts && intel.personalizedAnalysis.impacts.length))) {
+    renderAnalysisArea();
+    renderAnalysisResult(intel.personalizedAnalysis);
+    document.getElementById('generateBtn').innerHTML = '📊 重新生成报告';
+  } else {
+    renderAnalysisArea();
+  }
   renderRelated((relatedRes.data || relatedRes || []));
 });
 

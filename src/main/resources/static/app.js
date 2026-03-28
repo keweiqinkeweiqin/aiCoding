@@ -323,8 +323,13 @@ async function toggleIntelDetail(id) {
     // === Personalized Analysis Section ===
     if (detail.personalizedAnalysis) {
       const pa = detail.personalizedAnalysis;
-      html += `<div style="margin-bottom:16px;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-radius:10px">`;
-      html += `<div style="font-size:14px;color:#c4b5fd;margin-bottom:12px;font-weight:600">🎯 个性化研判</div>`;
+      const hasAnalysis = pa.analysis || (pa.impacts && pa.impacts.length) || pa.suggestion;
+
+      html += `<div id="intel-analysis-${id}" style="margin-bottom:16px;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-radius:10px">`;
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:14px;color:#c4b5fd;font-weight:600">🎯 个性化研判</div>
+        <button onclick="generateIntelAnalysis(${id})" class="btn btn-purple" id="btnIntelAnalysis-${id}" style="font-size:12px;padding:5px 14px">${hasAnalysis ? '🔄 重新研判' : '🧠 生成研判'}</button>
+      </div>`;
 
       // User profile card
       if (pa.userProfile) {
@@ -336,37 +341,44 @@ async function toggleIntelDetail(id) {
         html += `</div>`;
       }
 
-      // Impacts
-      if (pa.impacts && pa.impacts.length) {
-        html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
-        pa.impacts.forEach(imp => {
-          html += `<div class="impact-card">
-            <div class="impact-stock">${esc(imp.stock || imp.stockCode || '')}</div>
-            <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || imp.description || '')}</span></div>
-            ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
-            ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
+      html += `<div id="intel-analysis-content-${id}">`;
+
+      if (hasAnalysis) {
+        // Impacts
+        if (pa.impacts && pa.impacts.length) {
+          html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
+          pa.impacts.forEach(imp => {
+            html += `<div class="impact-card">
+              <div class="impact-stock">${esc(imp.stock || imp.stockCode || '')}</div>
+              <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || imp.description || '')}</span></div>
+              ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
+              ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
+            </div>`;
+          });
+          html += `</div>`;
+        }
+
+        // Suggestion
+        if (pa.suggestion) {
+          html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
+            <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
+            <div style="font-size:13px;color:#e0e0e0">${esc(pa.suggestion)}</div>
           </div>`;
-        });
-        html += `</div>`;
+        }
+
+        // Risks
+        if (pa.risks && pa.risks.length) {
+          html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
+            <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
+            ${pa.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
+          </div>`;
+        }
+      } else {
+        html += `<div style="color:#8890b5;font-size:13px;padding:8px 0">暂无研判结果，点击上方按钮生成</div>`;
       }
 
-      // Suggestion
-      if (pa.suggestion) {
-        html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
-          <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
-          <div style="font-size:13px;color:#e0e0e0">${esc(pa.suggestion)}</div>
-        </div>`;
-      }
-
-      // Risks
-      if (pa.risks && pa.risks.length) {
-        html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
-          <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
-          ${pa.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
-        </div>`;
-      }
-
-      html += `</div>`;
+      html += `</div>`; // close intel-analysis-content
+      html += `</div>`; // close intel-analysis
     }
 
     // Sources
@@ -399,6 +411,70 @@ async function toggleIntelDetail(id) {
   } catch (e) {
     detailEl.innerHTML = `<div style="color:#ef4444;padding:12px;font-size:13px">加载详情失败: ${e.message}</div>`;
   }
+}
+
+// ============================================================
+// 3.1 情报内联研判（异步调用LLM）
+// ============================================================
+
+async function generateIntelAnalysis(intelId) {
+  const btn = document.getElementById('btnIntelAnalysis-' + intelId);
+  const contentEl = document.getElementById('intel-analysis-content-' + intelId);
+  if (!btn || !contentEl) return;
+
+  btn.disabled = true;
+  btn.textContent = '⏳ 分析中...';
+  contentEl.innerHTML = '<div class="loading">正在调用AI生成研判，请稍候...</div>';
+
+  try {
+    const r = await fetch(API + '/api/analysis/generate?userId=' + currentUserId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ articleId: intelId })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || '请求失败 (' + r.status + ')');
+    }
+    const d = await r.json();
+
+    let html = '';
+    if (d.impacts && d.impacts.length) {
+      html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
+      d.impacts.forEach(imp => {
+        html += `<div class="impact-card">
+          <div class="impact-stock">${esc(imp.stock || '')}</div>
+          <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || '')}</span></div>
+          ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
+          ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
+        </div>`;
+      });
+      html += `</div>`;
+    }
+    if (d.suggestion) {
+      html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
+        <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
+        <div style="font-size:13px;color:#e0e0e0">${esc(d.suggestion)}</div>
+      </div>`;
+    }
+    if (d.risks && d.risks.length) {
+      html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
+        <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
+        ${d.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
+      </div>`;
+    }
+    if (d.analysis && !d.impacts?.length && !d.suggestion) {
+      html += `<div style="font-size:13px;color:#e0e0e0;line-height:1.7;white-space:pre-wrap">${esc(d.analysis)}</div>`;
+    }
+    if (!html) html = '<div style="color:#8890b5;font-size:13px">AI 未返回有效分析结果</div>';
+
+    contentEl.innerHTML = html;
+    btn.textContent = '🔄 重新研判';
+  } catch (e) {
+    contentEl.innerHTML = `<div style="color:#ef4444;font-size:13px">❌ 研判失败: ${esc(e.message)}</div>`;
+    btn.textContent = '🧠 重试研判';
+  }
+  btn.disabled = false;
 }
 
 // ============================================================
