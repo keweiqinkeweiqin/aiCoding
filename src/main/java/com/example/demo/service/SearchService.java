@@ -37,49 +37,51 @@ public class SearchService {
     }
 
     /**
-     * 搜索情报：语义搜索 + 关键词模糊匹配，合并去重，支持排序和分页
+     * 搜索情报：语义搜索 + 关键词模糊匹配，合并去重，支持排序和分页。
+     * relevance 排序基于语义相似度分数（情报取其关联文章的最高相似度）。
      */
     public SearchResult search(String keyword, int page, int size, String sortBy) {
         if (keyword == null || keyword.isBlank()) {
             return new SearchResult(List.of(), 0, 0, page);
         }
 
-        // 记录热门搜索计数
         recordTrending(keyword.trim());
 
-        // 1. 语义搜索 — 找到相关的 NewsArticle IDs
-        Set<Long> matchedIntelligenceIds = new LinkedHashSet<>();
+        // 1. 语义搜索 — 带分数，映射到情报
+        // key=intelligenceId, value=该情报下所有关联文章的最高相似度
+        Map<Long, Double> intelRelevanceScores = new LinkedHashMap<>();
 
         try {
-            List<Long> semanticArticleIds = vectorSearchService.semanticSearch(keyword, 50);
-            // 通过 IntelligenceArticle 关联表找到对应的 Intelligence IDs
-            for (Long articleId : semanticArticleIds) {
-                // 查找该文章关联的情报
-                List<IntelligenceArticle> links = intelligenceArticleRepository
-                        .findByArticleId(articleId);
+            List<VectorSearchService.ScoredId> scored =
+                    vectorSearchService.semanticSearchWithScores(keyword, 50);
+            for (VectorSearchService.ScoredId s : scored) {
+                List<IntelligenceArticle> links =
+                        intelligenceArticleRepository.findByArticleId(s.id());
                 for (IntelligenceArticle link : links) {
-                    matchedIntelligenceIds.add(link.getIntelligenceId());
+                    intelRelevanceScores.merge(link.getIntelligenceId(), s.score(), Math::max);
                 }
             }
         } catch (Exception e) {
             log.warn("语义搜索失败，降级为纯关键词搜索: {}", e.getMessage());
         }
 
-        // 2. 关键词模糊匹配
+        // 2. 关键词模糊匹配（给一个基础相关性分数 0.3）
         List<Intelligence> keywordResults = intelligenceRepository.searchByKeyword(keyword.trim());
         for (Intelligence intel : keywordResults) {
-            matchedIntelligenceIds.add(intel.getId());
+            // 只在语义搜索没命中时补充，不覆盖更高的语义分数
+            intelRelevanceScores.putIfAbsent(intel.getId(), 0.3);
         }
 
-        if (matchedIntelligenceIds.isEmpty()) {
+        if (intelRelevanceScores.isEmpty()) {
             return new SearchResult(List.of(), 0, 0, page);
         }
 
         // 3. 批量查询所有匹配的情报
-        List<Intelligence> allResults = intelligenceRepository.findAllById(matchedIntelligenceIds);
+        List<Intelligence> allResults = intelligenceRepository
+                .findAllById(intelRelevanceScores.keySet());
 
         // 4. 排序
-        sortResults(allResults, sortBy);
+        sortResults(allResults, sortBy, intelRelevanceScores);
 
         // 5. 分页
         int total = allResults.size();
@@ -91,15 +93,15 @@ public class SearchService {
         return new SearchResult(pageContent, total, totalPages, page);
     }
 
-    private void sortResults(List<Intelligence> results, String sortBy) {
+    private void sortResults(List<Intelligence> results, String sortBy,
+                             Map<Long, Double> relevanceScores) {
         if ("credibility".equals(sortBy)) {
             results.sort((a, b) -> {
                 double sa = a.getCredibilityScore() != null ? a.getCredibilityScore() : 0;
                 double sb = b.getCredibilityScore() != null ? b.getCredibilityScore() : 0;
                 return Double.compare(sb, sa);
             });
-        } else {
-            // 默认按时间倒序
+        } else if ("time".equals(sortBy)) {
             results.sort((a, b) -> {
                 var ta = a.getLatestArticleTime();
                 var tb = b.getLatestArticleTime();
@@ -107,6 +109,19 @@ public class SearchService {
                 if (ta == null) return 1;
                 if (tb == null) return -1;
                 return tb.compareTo(ta);
+            });
+        } else {
+            // 默认 relevance：按语义相似度降序
+            results.sort((a, b) -> {
+                double sa = relevanceScores.getOrDefault(a.getId(), 0.0);
+                double sb = relevanceScores.getOrDefault(b.getId(), 0.0);
+                int cmp = Double.compare(sb, sa);
+                if (cmp != 0) return cmp;
+                // 同分按时间倒序
+                var ta = a.getLatestArticleTime();
+                var tb = b.getLatestArticleTime();
+                if (ta != null && tb != null) return tb.compareTo(ta);
+                return 0;
             });
         }
     }

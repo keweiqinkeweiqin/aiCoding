@@ -224,6 +224,7 @@ function initIntelPanel() {
       <div class="section-title" style="margin-bottom:0">🔍 情报中心</div>
       <div style="display:flex;gap:8px">
         <button onclick="triggerCluster()" class="btn btn-purple" id="btnCluster">🔄 手动聚类</button>
+        <button onclick="refreshContent()" class="btn btn-success" id="btnRefresh">🔃 刷新正文</button>
         <button onclick="loadIntelligences()" class="btn btn-ghost">刷新</button>
       </div>
     </div>
@@ -244,6 +245,20 @@ async function triggerCluster() {
   } catch (e) { alert('聚类失败: ' + e.message); }
   btn.disabled = false;
   btn.textContent = '🔄 手动聚类';
+}
+
+async function refreshContent() {
+  const btn = document.getElementById('btnRefresh');
+  btn.disabled = true;
+  btn.textContent = '⏳ 清除中...';
+  try {
+    const r = await fetch(API + '/api/intelligences/refresh-content', { method: 'POST' });
+    const d = await r.json();
+    alert('已清空 ' + d.data.cleared + ' 条情报的正文缓存，下次查看详情时将重新生成');
+    loadIntelligences();
+  } catch (e) { alert('刷新失败: ' + e.message); }
+  btn.disabled = false;
+  btn.textContent = '🔃 刷新正文';
 }
 
 async function loadIntelligences() {

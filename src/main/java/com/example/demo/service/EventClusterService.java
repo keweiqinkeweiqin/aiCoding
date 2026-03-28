@@ -84,6 +84,8 @@ public class EventClusterService {
                 try {
                     intelligenceArticleRepository.save(
                             new IntelligenceArticle(matched.getId(), article.getId(), false));
+                    // 新来源合入后清空 content，下次访问详情时用新 prompt 重新生成
+                    matched.setContent(null);
                     updateIntelligenceMetadata(matched);
                     merged++;
                 } catch (Exception e) {
@@ -289,9 +291,10 @@ public class EventClusterService {
                 String titles = articles.stream()
                         .map(a -> "[" + a.getSourceName() + "] " + a.getTitle())
                         .collect(Collectors.joining("\n"));
-                String prompt = "Based on these news headlines about the same event, "
-                        + "generate a concise Chinese title (max 30 chars) and a summary (max 100 chars). "
-                        + "Return ONLY in format: TITLE: xxx\nSUMMARY: xxx\n\n" + titles;
+                String prompt = "你是一位资深财经编辑。根据以下多条关于同一事件的新闻标题，"
+                        + "生成一个精炼的中文情报标题（不超过30字，突出核心事件和影响）和一句话摘要（不超过100字）。\n"
+                        + "严格按以下格式返回，不要输出其他内容：\n"
+                        + "TITLE: 标题内容\nSUMMARY: 摘要内容\n\n" + titles;
                 String resp = chatClient.prompt().user(prompt).call().content();
                 if (resp != null) {
                     for (String line : resp.split("\n")) {

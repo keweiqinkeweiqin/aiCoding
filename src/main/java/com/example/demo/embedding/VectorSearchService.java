@@ -51,16 +51,24 @@ public class VectorSearchService {
 
     /** 语义搜索：返回最相似的topK篇文章ID */
     public List<Long> semanticSearch(String queryText, int topK) {
+        return semanticSearchWithScores(queryText, topK).stream()
+                .map(ScoredId::id)
+                .collect(Collectors.toList());
+    }
+
+    /** 语义搜索：返回最相似的topK篇文章ID + 相似度分数 */
+    public List<ScoredId> semanticSearchWithScores(String queryText, int topK) {
         float[] queryVec = embeddingClient.embed(queryText);
         if (queryVec.length == 0) return List.of();
 
         return vectorCache.entrySet().stream()
-                .map(e -> Map.entry(e.getKey(), cosineSimilarity(queryVec, e.getValue())))
-                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+                .map(e -> new ScoredId(e.getKey(), cosineSimilarity(queryVec, e.getValue())))
+                .sorted((a, b) -> Double.compare(b.score(), a.score()))
                 .limit(topK)
-                .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
     }
+
+    public record ScoredId(Long id, double score) {}
 
     /** 语义去重：返回相似文章ID，null表示不重复 */
     public Long findSemanticDuplicate(String text, double threshold) {

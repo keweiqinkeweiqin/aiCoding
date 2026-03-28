@@ -1,8 +1,10 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.Intelligence;
+import com.example.demo.model.UserHolding;
 import com.example.demo.model.UserProfile;
 import com.example.demo.repository.IntelligenceRepository;
+import com.example.demo.repository.UserHoldingRepository;
 import com.example.demo.repository.UserProfileRepository;
 import com.example.demo.service.AnalysisService;
 import com.example.demo.service.EventClusterService;
@@ -25,17 +27,20 @@ public class IntelligenceController {
     private final EventClusterService eventClusterService;
     private final IntelligenceRepository intelligenceRepository;
     private final UserProfileRepository userProfileRepository;
+    private final UserHoldingRepository userHoldingRepository;
     private final AnalysisService analysisService;
 
     public IntelligenceController(IntelligenceService intelligenceService,
                                   EventClusterService eventClusterService,
                                   IntelligenceRepository intelligenceRepository,
                                   UserProfileRepository userProfileRepository,
+                                  UserHoldingRepository userHoldingRepository,
                                   AnalysisService analysisService) {
         this.intelligenceService = intelligenceService;
         this.eventClusterService = eventClusterService;
         this.intelligenceRepository = intelligenceRepository;
         this.userProfileRepository = userProfileRepository;
+        this.userHoldingRepository = userHoldingRepository;
         this.analysisService = analysisService;
     }
 
@@ -58,20 +63,22 @@ public class IntelligenceController {
         return listHome(hours, userId);
     }
 
-    /** C端首页：每个优先级各取一条，个性化排序 */
+    /** C端首页：画像相关性排序后取前3条 */
     private ResponseEntity<Map<String, Object>> listHome(int hours, Long userId) {
         var all = intelligenceRepository
                 .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
                         java.time.LocalDateTime.now().minusHours(hours));
 
-        // 每个优先级取一条
-        List<Intelligence> picked = new ArrayList<>();
-        for (String p : List.of("high", "medium", "low")) {
-            all.stream().filter(i -> p.equals(i.getPriority())).findFirst()
-                    .ifPresent(picked::add);
+        if (all.isEmpty()) {
+            return ResponseEntity.ok(Map.of(
+                    "code", 200,
+                    "data", Map.of("content", List.of(),
+                            "totalElements", 0, "totalPages", 0, "currentPage", 0)
+            ));
         }
 
         // 个性化排序
+        List<Intelligence> sorted = new ArrayList<>(all);
         UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
         if (profile != null) {
             String fa = profile.getFocusAreas();
@@ -79,7 +86,7 @@ public class IntelligenceController {
             if ((fa != null && !fa.isBlank()) || (h != null && !h.isBlank())) {
                 Set<String> areas = fa != null ? Set.of(fa.toLowerCase().split(",")) : Set.of();
                 Set<String> stocks = h != null ? Set.of(h.toUpperCase().split(",")) : Set.of();
-                picked.sort((a, b) -> {
+                sorted.sort((a, b) -> {
                     int diff = Integer.compare(calcRelevance(b, areas, stocks), calcRelevance(a, areas, stocks));
                     if (diff != 0) return diff;
                     if (a.getLatestArticleTime() != null && b.getLatestArticleTime() != null)
@@ -89,6 +96,8 @@ public class IntelligenceController {
             }
         }
 
+        // 取前3条
+        var picked = sorted.stream().limit(3).toList();
         var content = picked.stream().map(this::toListItem).toList();
         return ResponseEntity.ok(Map.of(
                 "code", 200,
@@ -224,8 +233,17 @@ public class IntelligenceController {
                     profileCard.put("investmentCycle", profile.getInvestmentCycle());
                     profileCard.put("focusAreas", profile.getFocusAreas() != null
                             ? List.of(profile.getFocusAreas().split(",")) : List.of());
-                    profileCard.put("holdings", profile.getHoldings() != null
-                            ? List.of(profile.getHoldings().split(",")) : List.of());
+                    // 从 user_holdings 表读取完整持仓信息
+                    var holdings = userHoldingRepository.findByUserId(userId);
+                    profileCard.put("holdings", holdings.stream().map(h -> {
+                        Map<String, Object> hm = new java.util.LinkedHashMap<>();
+                        hm.put("stockCode", h.getStockCode());
+                        hm.put("stockName", h.getStockName());
+                        hm.put("sector", h.getSector());
+                        hm.put("percentage", h.getPercentage());
+                        hm.put("costPrice", h.getCostPrice());
+                        return hm;
+                    }).toList());
                     personalized.put("userProfile", profileCard);
                 } else {
                     personalized.put("userProfile", null);
@@ -310,6 +328,16 @@ public class IntelligenceController {
                         "created", result.created(),
                         "merged", result.merged()
                 )
+        ));
+    }
+
+    /** 清空所有情报的 content 缓存，下次访问详情时用最新 prompt 重新生成 */
+    @PostMapping("/refresh-content")
+    public ResponseEntity<Map<String, Object>> refreshContent() {
+        int count = intelligenceService.clearAllContent();
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of("cleared", count)
         ));
     }
 

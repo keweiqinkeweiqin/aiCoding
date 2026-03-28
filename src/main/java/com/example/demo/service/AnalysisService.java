@@ -28,6 +28,7 @@ public class AnalysisService {
     private final IntelligenceRepository intelligenceRepository;
     private final UserRepository userRepository;
     private final UserProfileRepository userProfileRepository;
+    private final UserHoldingRepository userHoldingRepository;
     private final AnalysisRecordRepository analysisRecordRepository;
     private final RestTemplate restTemplate;
 
@@ -40,11 +41,13 @@ public class AnalysisService {
     public AnalysisService(IntelligenceRepository intelligenceRepository,
                            UserRepository userRepository,
                            UserProfileRepository userProfileRepository,
+                           UserHoldingRepository userHoldingRepository,
                            AnalysisRecordRepository analysisRecordRepository,
                            RestTemplate restTemplate) {
         this.intelligenceRepository = intelligenceRepository;
         this.userRepository = userRepository;
         this.userProfileRepository = userProfileRepository;
+        this.userHoldingRepository = userHoldingRepository;
         this.analysisRecordRepository = analysisRecordRepository;
         this.restTemplate = restTemplate;
     }
@@ -77,7 +80,7 @@ public class AnalysisService {
                 + "- 操作建议：结合用户投资者类型和风险偏好给出";
     }
 
-    String buildUserPrompt(Intelligence intel, UserProfile profile) {
+    String buildUserPrompt(Intelligence intel, UserProfile profile, List<UserHolding> holdings) {
         StringBuilder sb = new StringBuilder();
         sb.append("## 情报信息\n");
         sb.append("- 标题：").append(intel.getTitle()).append("\n");
@@ -90,10 +93,22 @@ public class AnalysisService {
         sb.append("- 投资周期：").append(profile.getInvestmentCycle()).append("\n");
         sb.append("- 关注领域：").append(profile.getFocusAreas()).append("\n");
         sb.append("\n## 用户持仓\n");
-        String holdings = profile.getHoldings();
-        if (holdings != null && !holdings.isBlank()) {
-            for (String name : holdings.split(",")) {
-                sb.append("- ").append(name.trim()).append("\n");
+        if (holdings != null && !holdings.isEmpty()) {
+            for (UserHolding h : holdings) {
+                sb.append("- ").append(h.getStockCode());
+                if (h.getStockName() != null && !h.getStockName().isBlank()) {
+                    sb.append(" (").append(h.getStockName()).append(")");
+                }
+                if (h.getPercentage() != null) {
+                    sb.append(" 持仓占比:").append(h.getPercentage()).append("%");
+                }
+                if (h.getCostPrice() != null) {
+                    sb.append(" 成本价:$").append(h.getCostPrice());
+                }
+                if (h.getSector() != null && !h.getSector().isBlank()) {
+                    sb.append(" 行业:").append(h.getSector());
+                }
+                sb.append("\n");
             }
         } else {
             sb.append("- 暂无持仓\n");
@@ -174,10 +189,11 @@ public class AnalysisService {
 
         // Load profile
         UserProfile profile = userProfileRepository.findByUserId(userId).orElse(new UserProfile());
+        List<UserHolding> holdings = userHoldingRepository.findByUserId(userId);
 
         // Build prompts and call LLM
         String systemPrompt = buildSystemPrompt();
-        String userPrompt = buildUserPrompt(intel, profile);
+        String userPrompt = buildUserPrompt(intel, profile, holdings);
 
         Map<String, Object> result;
         try {
@@ -220,9 +236,10 @@ public class AnalysisService {
                         .orElseThrow(() -> new NoSuchElementException("用户不存在"));
 
                 UserProfile profile = userProfileRepository.findByUserId(userId).orElse(new UserProfile());
+                List<UserHolding> holdings = userHoldingRepository.findByUserId(userId);
 
                 String systemPrompt = buildSystemPrompt();
-                String userPrompt = buildUserPrompt(intel, profile);
+                String userPrompt = buildUserPrompt(intel, profile, holdings);
                 String raw = callLlm(systemPrompt, userPrompt);
                 Map<String, Object> result = parseLlmResponse(raw);
 

@@ -166,7 +166,11 @@ Response:
     "personalizedAnalysis": {
       "userProfile": {
         "investorType": "growth", "investmentCycle": "medium",
-        "focusAreas": ["AI芯片", "云计算"], "holdings": ["NVDA", "AMD"]
+        "focusAreas": ["AI芯片", "云计算"],
+        "holdings": [
+          { "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
+          { "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
+        ]
       },
       "analysis": "基于多来源交叉验证...",
       "impacts": [
@@ -183,6 +187,7 @@ Response:
 
 说明：
 - personalizedAnalysis：传 userId 且用户存在时返回，否则 null
+- userProfile.holdings：从 user_holdings 表读取完整持仓对象数组（含 stockCode/stockName/sector/percentage/costPrice），不再是简单字符串数组
 - LLM 分析有 15 秒超时保护，超时时 analysis 返回"分析超时，请稍后重试"
 - 已有缓存（1 小时内）时直接返回缓存，不重复调用 LLM
 
@@ -409,13 +414,82 @@ Response:
 
 ---
 
-## 8. 未实现的 C 端接口
+## 8. 搜索
+
+### POST /api/search — 搜索情报
+
+语义搜索 + 关键词模糊匹配，合并去重，支持排序和分页。
+
+Request:
+```json
+{
+  "keyword": "AI芯片",
+  "page": 0,
+  "size": 20,
+  "sortBy": "relevance"
+}
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| keyword | "" | 搜索关键词 |
+| page | 0 | 页码 |
+| size | 20 | 每页条数 |
+| sortBy | "relevance" | 排序方式：`relevance`（语义相似度）/ `time`（时间倒序）/ `credibility`（置信度倒序） |
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "content": [
+      {
+        "id": 1, "priority": "high", "title": "...", "summary": "...",
+        "primarySource": "财联社", "credibilityLevel": "authoritative",
+        "credibilityScore": 0.87, "sourceCount": 3, "sentiment": "positive",
+        "sentimentScore": 0.85, "relatedStocks": "NVDA,TSM", "tags": "AI,chip",
+        "latestArticleTime": "2026-03-27T09:15:00", "createdAt": "2026-03-27T09:20:00"
+      }
+    ],
+    "totalElements": 12,
+    "totalPages": 1,
+    "currentPage": 0
+  }
+}
+```
+
+说明：
+- 语义搜索通过 Embedding 余弦相似度匹配关联新闻，再映射到情报
+- 关键词模糊匹配作为补充（基础相关性分数 0.3）
+- `relevance` 排序基于语义相似度分数，同分按时间倒序
+- 每次搜索自动记录到热门搜索统计
+
+### GET /api/search/trending — 热门搜索
+
+Params: `?limit=5`
+
+Response:
+```json
+{
+  "code": 200,
+  "data": [
+    { "keyword": "AI芯片", "searchCount": 15 },
+    { "keyword": "英伟达", "searchCount": 8 }
+  ]
+}
+```
+
+说明：
+- 基于当天搜索记录聚合，按搜索次数降序
+- 默认返回 Top 5
+
+---
+
+## 9. 未实现的 C 端接口
 
 | 页面 | 接口 | 说明 |
 |------|------|------|
-| 搜索页 | POST /api/search | 搜索情报（目前可用 /api/query 替代） |
 | 搜索页 | GET /api/search/history | 搜索历史 |
-| 搜索页 | GET /api/search/trending | 热门搜索 |
 | 个人中心 | GET /api/user/center | 用户统计+会员 |
 | 个人中心 | GET /api/user/favorites | 收藏列表 |
 | 情报详情 | POST /api/intelligences/{id}/feedback | 认同/不认同 |
@@ -449,6 +523,19 @@ Response: `{ "collected": 50, "stored": 50 }`
 ### POST /api/intelligences/cluster — 手动触发事件聚类
 
 Response: `{ "code": 200, "data": { "created": 15, "merged": 3 } }`
+
+### POST /api/intelligences/refresh-content — 清空情报正文缓存
+
+清空所有情报的 `content` 字段缓存，下次访问详情时会用最新 prompt 重新调用 LLM 生成。适用于调整 prompt 后批量刷新。
+
+Response:
+```json
+{ "code": 200, "data": { "cleared": 42 } }
+```
+
+说明：
+- `cleared`: 被清空 content 的情报数量
+- 清空后不会立即重新生成，而是在用户访问 `GET /api/intelligences/{id}` 时按需生成
 
 说明：定时任务已启用，新闻每 15 分钟自动采集，行情每 5 分钟自动采集。
 

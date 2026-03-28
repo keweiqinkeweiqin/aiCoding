@@ -26,7 +26,7 @@ public class SearchController {
         String keyword = (String) body.getOrDefault("keyword", "");
         int page = body.containsKey("page") ? ((Number) body.get("page")).intValue() : 0;
         int size = body.containsKey("size") ? ((Number) body.get("size")).intValue() : 20;
-        String sortBy = (String) body.getOrDefault("sortBy", "time");
+        String sortBy = (String) body.getOrDefault("sortBy", "relevance");
 
         SearchService.SearchResult result = searchService.search(keyword, page, size, sortBy);
 

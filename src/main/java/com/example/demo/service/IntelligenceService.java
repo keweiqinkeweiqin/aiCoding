@@ -44,6 +44,21 @@ public class IntelligenceService {
                 since, PageRequest.of(page, size));
     }
 
+    /** 清空所有情报的 content 缓存 */
+    public int clearAllContent() {
+        List<Intelligence> all = intelligenceRepository.findAll();
+        int count = 0;
+        for (Intelligence intel : all) {
+            if (intel.getContent() != null && !intel.getContent().isBlank()) {
+                intel.setContent(null);
+                intelligenceRepository.save(intel);
+                count++;
+            }
+        }
+        log.info("Cleared content for {} intelligences", count);
+        return count;
+    }
+
     /** 获取情报详情，包含关联的所有原始新闻 */
     public IntelligenceDetail getDetail(Long id) {
         Intelligence intel = intelligenceRepository.findById(id)
@@ -98,23 +113,70 @@ public class IntelligenceService {
                 String articlesText = articles.stream().map(a -> {
                     String body = a.getSummary() != null ? a.getSummary() : "";
                     if (body.isBlank() && a.getContent() != null) {
-                        body = a.getContent().length() > 300 ? a.getContent().substring(0, 300) : a.getContent();
+                        body = a.getContent().length() > 500 ? a.getContent().substring(0, 500) : a.getContent();
                     }
-                    return "[" + a.getSourceName() + "] " + a.getTitle() + "\n" + body;
+                    return "【" + a.getSourceName() + "】" + a.getTitle() + "\n" + body;
                 }).collect(Collectors.joining("\n\n"));
 
-                String prompt = "You are a financial analyst. Based on the following news articles about the same event, "
-                        + "write a comprehensive Chinese analysis article (300-500 chars). "
-                        + "Structure: 1) Event overview 2) Key details from different sources 3) Market impact. "
-                        + "Write directly, no markdown headers.\n\n" + articlesText;
+                String prompt = "你是「华尔街之眼」的资深投研分析师，擅长将多条新闻综合提炼为高质量的投研情报。\n\n"
+                        + "请基于以下 " + articles.size() + " 条来自不同来源的新闻报道，撰写一篇结构清晰的中文投研分析文章。\n\n"
+                        + "【写作要求】\n"
+                        + "1. 第一段「事件概述」：用2-3句话概括核心事件，点明时间、主体、关键动作\n"
+                        + "2. 第二段「多方信息」：综合各来源的差异化信息，标注信息来源（如'据财联社报道'），区分事实与观点\n"
+                        + "3. 第三段「市场影响」：分析对相关行业/个股的潜在影响，引用具体数据（如有）\n"
+                        + "4. 第四段「关注要点」：列出2-3个后续值得关注的要点，用「·」开头\n\n"
+                        + "【格式要求】\n"
+                        + "- 每段之间用空行分隔\n"
+                        + "- 总字数控制在400-600字\n"
+                        + "- 语言专业但易读，适合投资者快速阅读\n"
+                        + "- 不要使用 Markdown 标记（如 # ** 等），直接输出纯文本\n"
+                        + "- 段落开头不需要标注「事件概述」等标题，直接写内容\n\n"
+                        + "【新闻素材】\n" + articlesText;
 
                 String content = chatClient.prompt().user(prompt).call().content();
                 if (content != null && !content.isBlank()) {
-                    log.info("LLM content generated for intel {}", intel.getId());
+                    // 清理可能的 Markdown 标记
+                    content = content.replaceAll("(?m)^#{1,4}\\s*", "")
+                                     .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
+                                     .replaceAll("\\*([^*]+)\\*", "$1")
+                                     .trim();
+                    log.info("LLM content generated for intel {} ({} chars)", intel.getId(), content.length());
                     return content;
                 }
             } catch (Exception e) {
                 log.warn("LLM content generation failed for intel {}: {}", intel.getId(), e.getMessage());
+            }
+        }
+
+        // Single source: also try LLM to polish the content
+        if (articles.size() == 1) {
+            try {
+                NewsArticle a = articles.get(0);
+                String body = a.getContent() != null ? a.getContent() : (a.getSummary() != null ? a.getSummary() : "");
+                if (body.length() > 800) body = body.substring(0, 800);
+                if (!body.isBlank()) {
+                    String prompt = "你是「华尔街之眼」的投研分析师。请将以下新闻改写为一篇简洁的投研快讯。\n\n"
+                            + "【要求】\n"
+                            + "- 第一段概述核心事件（2-3句）\n"
+                            + "- 第二段分析市场影响和关注要点\n"
+                            + "- 总字数200-300字，语言专业易读\n"
+                            + "- 不要使用 Markdown 标记，直接输出纯文本\n"
+                            + "- 段落间用空行分隔\n\n"
+                            + "【来源：" + a.getSourceName() + "】\n"
+                            + a.getTitle() + "\n" + body;
+
+                    String content = chatClient.prompt().user(prompt).call().content();
+                    if (content != null && !content.isBlank()) {
+                        content = content.replaceAll("(?m)^#{1,4}\\s*", "")
+                                         .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
+                                         .replaceAll("\\*([^*]+)\\*", "$1")
+                                         .trim();
+                        log.info("LLM content polished for single-source intel {}", intel.getId());
+                        return content;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("LLM polish failed for intel {}: {}", intel.getId(), e.getMessage());
             }
         }
 
@@ -123,7 +185,7 @@ public class IntelligenceService {
         for (int i = 0; i < articles.size(); i++) {
             NewsArticle a = articles.get(i);
             if (articles.size() > 1) {
-                sb.append("[").append(a.getSourceName() != null ? a.getSourceName() : "Source").append("] ");
+                sb.append("【").append(a.getSourceName() != null ? a.getSourceName() : "来源").append("】");
             }
             String body = a.getContent();
             if (body == null || body.isBlank()) body = a.getSummary();
