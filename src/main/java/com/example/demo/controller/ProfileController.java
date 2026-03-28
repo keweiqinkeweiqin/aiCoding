@@ -1,11 +1,8 @@
 package com.example.demo.controller;
 
-import com.example.demo.model.UserHolding;
 import com.example.demo.model.UserProfile;
-import com.example.demo.repository.UserHoldingRepository;
 import com.example.demo.repository.UserProfileRepository;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -15,12 +12,9 @@ import java.util.*;
 public class ProfileController {
 
     private final UserProfileRepository userProfileRepository;
-    private final UserHoldingRepository userHoldingRepository;
 
-    public ProfileController(UserProfileRepository userProfileRepository,
-                             UserHoldingRepository userHoldingRepository) {
+    public ProfileController(UserProfileRepository userProfileRepository) {
         this.userProfileRepository = userProfileRepository;
-        this.userHoldingRepository = userHoldingRepository;
     }
 
     /** GET /api/profile?userId=1 */
@@ -28,21 +22,13 @@ public class ProfileController {
     public ResponseEntity<Map<String, Object>> getProfile(
             @RequestParam(defaultValue = "1") Long userId) {
         var profile = userProfileRepository.findByUserId(userId).orElse(null);
-        var holdings = userHoldingRepository.findByUserId(userId);
         Map<String, Object> data = new LinkedHashMap<>();
         if (profile != null) {
             data.put("investorType", profile.getInvestorType());
             data.put("investmentCycle", profile.getInvestmentCycle());
             data.put("focusAreas", profile.getFocusAreas() != null ? profile.getFocusAreas() : "");
+            data.put("holdings", profile.getHoldings() != null ? profile.getHoldings() : "");
         }
-        data.put("holdings", holdings.stream().map(h -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", h.getId());
-            m.put("stockCode", h.getStockCode());
-            m.put("stockName", h.getStockName());
-            m.put("sector", h.getSector());
-            return m;
-        }).toList());
         return ResponseEntity.ok(Map.of("code", 200, "data", data));
     }
 
@@ -59,58 +45,12 @@ public class ProfileController {
         if (body.containsKey("investorType")) profile.setInvestorType(body.get("investorType"));
         if (body.containsKey("investmentCycle")) profile.setInvestmentCycle(body.get("investmentCycle"));
         if (body.containsKey("focusAreas")) profile.setFocusAreas(body.get("focusAreas"));
+        if (body.containsKey("holdings")) profile.setHoldings(body.get("holdings"));
         userProfileRepository.save(profile);
         return ResponseEntity.ok(Map.of("code", 200, "message", "saved"));
     }
 
-    /** POST /api/profile/holdings?userId=1 */
-    @PostMapping("/holdings")
-    public ResponseEntity<Map<String, Object>> addHolding(
-            @RequestParam(defaultValue = "1") Long userId,
-            @RequestBody Map<String, String> body) {
-        String rawCode = body.get("stockCode");
-        if (rawCode == null || rawCode.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "message", "stockCode required"));
-        }
-        final String code = rawCode.toUpperCase().trim();
-        var existing = userHoldingRepository.findByUserIdAndStockCode(userId, code);
-        UserHolding h = existing.orElseGet(() -> {
-            UserHolding nh = new UserHolding();
-            nh.setUserId(userId);
-            nh.setStockCode(code);
-            return nh;
-        });
-        h.setStockName(body.getOrDefault("stockName", code));
-        h.setSector(body.get("sector"));
-        userHoldingRepository.save(h);
-        return ResponseEntity.ok(Map.of("code", 200, "message", "added", "data", Map.of("id", h.getId())));
-    }
-
-    /** DELETE /api/profile/holdings/{id} */
-    @DeleteMapping("/holdings/{id}")
-    @Transactional
-    public ResponseEntity<Map<String, Object>> removeHolding(@PathVariable Long id) {
-        userHoldingRepository.deleteById(id);
-        return ResponseEntity.ok(Map.of("code", 200, "message", "deleted"));
-    }
-
-    /** GET /api/profile/holdings?userId=1 */
-    @GetMapping("/holdings")
-    public ResponseEntity<Map<String, Object>> listHoldings(
-            @RequestParam(defaultValue = "1") Long userId) {
-        var holdings = userHoldingRepository.findByUserId(userId);
-        var list = holdings.stream().map(h -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", h.getId());
-            m.put("stockCode", h.getStockCode());
-            m.put("stockName", h.getStockName());
-            m.put("sector", h.getSector());
-            return m;
-        }).toList();
-        return ResponseEntity.ok(Map.of("code", 200, "data", list));
-    }
-
-    /** GET /api/profile/full?userId=1 — C端完整画像查询（用户信息+画像+持仓） */
+    /** GET /api/profile/full?userId=1 — C端完整画像查询 */
     @GetMapping("/full")
     public ResponseEntity<Map<String, Object>> getFullProfile(
             @RequestParam(defaultValue = "0") Long userId) {
@@ -118,31 +58,19 @@ public class ProfileController {
             return ResponseEntity.ok(Map.of("code", 200, "data", Map.of()));
         }
         Map<String, Object> data = new LinkedHashMap<>();
-
-        // 画像
         var profile = userProfileRepository.findByUserId(userId).orElse(null);
         if (profile != null) {
             data.put("investorType", profile.getInvestorType());
             data.put("investmentCycle", profile.getInvestmentCycle());
             data.put("focusAreas", profile.getFocusAreas() != null
                     ? List.of(profile.getFocusAreas().split(",")) : List.of());
+            data.put("holdings", profile.getHoldings() != null ? profile.getHoldings() : "");
         } else {
             data.put("investorType", null);
             data.put("investmentCycle", null);
             data.put("focusAreas", List.of());
+            data.put("holdings", "");
         }
-
-        // 持仓
-        var holdings = userHoldingRepository.findByUserId(userId);
-        data.put("holdings", holdings.stream().map(h -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", h.getId());
-            m.put("stockCode", h.getStockCode());
-            m.put("stockName", h.getStockName());
-            m.put("sector", h.getSector());
-            return m;
-        }).toList());
-
         return ResponseEntity.ok(Map.of("code", 200, "data", data));
     }
 }
