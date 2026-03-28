@@ -36,16 +36,25 @@ public class ProfileController {
     @PutMapping
     public ResponseEntity<Map<String, Object>> saveProfile(
             @RequestParam(defaultValue = "1") Long userId,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, Object> body) {
         var profile = userProfileRepository.findByUserId(userId).orElseGet(() -> {
             UserProfile p = new UserProfile();
             p.setUserId(userId);
             return p;
         });
-        if (body.containsKey("investorType")) profile.setInvestorType(body.get("investorType"));
-        if (body.containsKey("investmentCycle")) profile.setInvestmentCycle(body.get("investmentCycle"));
-        if (body.containsKey("focusAreas")) profile.setFocusAreas(body.get("focusAreas"));
-        if (body.containsKey("holdings")) profile.setHoldings(body.get("holdings"));
+        if (body.containsKey("investorType")) profile.setInvestorType((String) body.get("investorType"));
+        if (body.containsKey("investmentCycle")) profile.setInvestmentCycle((String) body.get("investmentCycle"));
+        if (body.containsKey("focusAreas")) {
+            Object fa = body.get("focusAreas");
+            if (fa instanceof java.util.List) {
+                @SuppressWarnings("unchecked")
+                java.util.List<String> list = (java.util.List<String>) fa;
+                profile.setFocusAreas(String.join(",", list));
+            } else {
+                profile.setFocusAreas(String.valueOf(fa));
+            }
+        }
+        if (body.containsKey("holdings")) profile.setHoldings(String.valueOf(body.get("holdings")));
         userProfileRepository.save(profile);
         return ResponseEntity.ok(Map.of("code", 200, "message", "saved"));
     }
