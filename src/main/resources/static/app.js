@@ -652,16 +652,16 @@ const INVESTMENT_CYCLES = [
 
 const FOCUS_OPTIONS = [
   { id: 'AI', name: 'AI' },
-  { id: 'chip', name: 'AI芯片' },
-  { id: 'cloud', name: '云计算' },
-  { id: 'semiconductor', name: '半导体' },
-  { id: 'llm', name: '大模型' },
-  { id: 'aigc', name: 'AIGC应用' },
-  { id: 'autonomous', name: '自动驾驶' },
-  { id: 'robot', name: '机器人' },
-  { id: 'quantum', name: '量子计算' },
-  { id: 'biotech', name: '生物科技' },
-  { id: 'new_energy', name: '新能源' }
+  { id: 'AI芯片', name: 'AI芯片' },
+  { id: '云计算', name: '云计算' },
+  { id: '半导体', name: '半导体' },
+  { id: '大模型', name: '大模型' },
+  { id: 'AIGC应用', name: 'AIGC应用' },
+  { id: '自动驾驶', name: '自动驾驶' },
+  { id: '机器人', name: '机器人' },
+  { id: '量子计算', name: '量子计算' },
+  { id: '生物科技', name: '生物科技' },
+  { id: '新能源', name: '新能源' }
 ];
 
 let profileData = {};
@@ -712,8 +712,12 @@ function initProfilePanel() {
       </div>
       <div>
         <div class="profile-field">
-          <label>关注领域（点击切换）</label>
+          <label>关注领域（点击切换，支持自定义）</label>
           <div id="profileFocusAreas" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <input id="customFocusInput" class="input" style="width:160px" placeholder="自定义领域">
+            <button onclick="addCustomFocus()" class="btn btn-ghost" style="padding:6px 12px;font-size:12px">+ 添加</button>
+          </div>
         </div>
       </div>
     </div>
@@ -724,15 +728,23 @@ function initProfilePanel() {
       <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
         <div>
           <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">股票代码</label>
-          <input id="holdingCodeInput" class="input" style="width:120px" placeholder="如 NVDA">
+          <input id="holdingCodeInput" class="input" style="width:100px" placeholder="如 NVDA">
         </div>
         <div>
           <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">股票名称</label>
-          <input id="holdingNameInput" class="input" style="width:140px" placeholder="如 NVIDIA">
+          <input id="holdingNameInput" class="input" style="width:120px" placeholder="如 英伟达">
         </div>
         <div>
-          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">板块(可选)</label>
-          <input id="holdingSectorInput" class="input" style="width:120px" placeholder="如 semiconductor">
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">所属行业</label>
+          <input id="holdingSectorInput" class="input" style="width:120px" placeholder="如 半导体">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">持仓占比(%)</label>
+          <input id="holdingPercentInput" class="input" style="width:90px" type="number" step="0.1" placeholder="如 40">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">成本价($)</label>
+          <input id="holdingCostInput" class="input" style="width:90px" type="number" step="0.01" placeholder="如 320">
         </div>
         <button onclick="addHolding()" class="btn btn-success">➕ 添加</button>
       </div>
@@ -854,9 +866,16 @@ function renderProfileForm() {
   const focusEl = document.getElementById('profileFocusAreas');
   if (focusEl) {
     const selected = (p.focusAreas || '').split(',').map(s => s.trim()).filter(Boolean);
-    focusEl.innerHTML = FOCUS_OPTIONS.map(f =>
+    const presetIds = FOCUS_OPTIONS.map(f => f.id);
+    // 预设选项
+    let html = FOCUS_OPTIONS.map(f =>
       `<span class="tag tag-toggle ${selected.includes(f.id) ? 'tag-active' : ''}" onclick="toggleFocus('${f.id}')">${f.name}</span>`
     ).join('');
+    // 用户自定义的（不在预设列表中的）
+    selected.filter(s => !presetIds.includes(s)).forEach(s => {
+      html += `<span class="tag tag-toggle tag-active" onclick="toggleFocus('${esc(s)}')">${esc(s)} ✕</span>`;
+    });
+    focusEl.innerHTML = html;
   }
 }
 
@@ -876,6 +895,19 @@ function toggleFocus(id) {
   if (idx >= 0) current.splice(idx, 1);
   else current.push(id);
   profileData.focusAreas = current.join(',');
+  renderProfileForm();
+}
+
+function addCustomFocus() {
+  const input = document.getElementById('customFocusInput');
+  const val = (input.value || '').trim();
+  if (!val) return;
+  const current = (profileData.focusAreas || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!current.includes(val)) {
+    current.push(val);
+    profileData.focusAreas = current.join(',');
+  }
+  input.value = '';
   renderProfileForm();
 }
 
@@ -945,11 +977,15 @@ function renderHoldings() {
   el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
     holdingsList.map(h => {
       const hId = h.id || h.holdingId;
-      return `<div class="card" style="display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:200px;flex:0 1 auto">
+      const pct = h.percentage != null ? `持仓: ${h.percentage}%` : '';
+      const cost = h.costPrice != null ? `成本: $${h.costPrice}` : '';
+      const extra = [pct, cost].filter(Boolean).join(' · ');
+      return `<div class="card" style="display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:220px;flex:0 1 auto">
         <div style="flex:1">
           <div style="font-size:14px;color:#ffd700;font-weight:600">${esc(h.stockCode)}</div>
           <div style="font-size:12px;color:#e0e0e0">${esc(h.stockName || '')}</div>
           ${h.sector ? `<div style="font-size:11px;color:#6b7280">${esc(h.sector)}</div>` : ''}
+          ${extra ? `<div style="font-size:11px;color:#8890b5;margin-top:2px">${extra}</div>` : ''}
         </div>
         <button onclick="deleteHolding(${hId})" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;color:#ef4444;border-color:#ef4444">✕</button>
       </div>`;
@@ -960,9 +996,13 @@ async function addHolding() {
   const codeInput = document.getElementById('holdingCodeInput');
   const nameInput = document.getElementById('holdingNameInput');
   const sectorInput = document.getElementById('holdingSectorInput');
+  const percentInput = document.getElementById('holdingPercentInput');
+  const costInput = document.getElementById('holdingCostInput');
   const stockCode = (codeInput.value || '').trim().toUpperCase();
   const stockName = (nameInput.value || '').trim();
   const sector = (sectorInput.value || '').trim();
+  const percentage = (percentInput.value || '').trim();
+  const costPrice = (costInput.value || '').trim();
 
   if (!stockCode) { alert('请输入股票代码'); return; }
   if (!stockName) { alert('请输入股票名称'); return; }
@@ -970,6 +1010,8 @@ async function addHolding() {
   try {
     const body = { stockCode, stockName };
     if (sector) body.sector = sector;
+    if (percentage) body.percentage = percentage;
+    if (costPrice) body.costPrice = costPrice;
     const r = await fetch(API + '/api/profile/holdings?userId=' + currentUserId, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -982,6 +1024,8 @@ async function addHolding() {
     codeInput.value = '';
     nameInput.value = '';
     sectorInput.value = '';
+    percentInput.value = '';
+    costInput.value = '';
     loadHoldings();
   } catch (e) { alert('添加持仓失败: ' + e.message); }
 }

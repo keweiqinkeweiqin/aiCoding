@@ -22,6 +22,9 @@ public class UserHolding {
     @Column(length = 100)
     private String sector;
 
+    private Double percentage;   // 持仓占比(%)
+    private Double costPrice;    // 成本价($)
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -41,6 +44,10 @@ public class UserHolding {
     public void setStockName(String stockName) { this.stockName = stockName; }
     public String getSector() { return sector; }
     public void setSector(String sector) { this.sector = sector; }
+    public Double getPercentage() { return percentage; }
+    public void setPercentage(Double percentage) { this.percentage = percentage; }
+    public Double getCostPrice() { return costPrice; }
+    public void setCostPrice(Double costPrice) { this.costPrice = costPrice; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }
