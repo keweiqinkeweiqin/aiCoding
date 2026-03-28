@@ -467,6 +467,8 @@ es.addEventListener('done', () => es.close());
 - `reasoning` 事件推送模型的思考过程（部分模型如 Qwen/DeepSeek 支持），前端可用可折叠区域展示
 - `reasoning` 阶段结束后开始推送 `token`，两者不会交叉出现
 - `token` 事件逐个推送 LLM 生成的文本片段，前端拼接即可
+- LLM 模型名从 `application.yml` 的 `spring.ai.openai.chat.options.model` 读取（当前为 GPT-5.4）
+- 后端兼容 `data: {json}` 和 `data:{json}` 两种 SSE 格式（部分 LLM 平台省略空格）
 - 原有 `POST /api/query` 同步接口保留，可用于不支持 SSE 的场景
 
 ---

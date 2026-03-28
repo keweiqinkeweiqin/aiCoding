@@ -1,7 +1,11 @@
 package com.example.demo.service;
 
 import com.example.demo.embedding.VectorSearchService;
+import com.example.demo.model.Intelligence;
+import com.example.demo.model.IntelligenceArticle;
 import com.example.demo.model.NewsArticle;
+import com.example.demo.repository.IntelligenceArticleRepository;
+import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.repository.NewsArticleRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,16 +25,18 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
 public class SmartQueryService {
 
     private static final Logger log = LoggerFactory.getLogger(SmartQueryService.class);
+    private static final double MIN_SIMILARITY = 0.3; // 最低相关度阈值
     private final VectorSearchService vectorSearchService;
     private final NewsArticleRepository newsArticleRepository;
+    private final IntelligenceRepository intelligenceRepository;
+    private final IntelligenceArticleRepository intelligenceArticleRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient streamHttpClient = HttpClient.newBuilder()
@@ -48,56 +54,135 @@ public class SmartQueryService {
 
     public SmartQueryService(VectorSearchService vectorSearchService,
                              NewsArticleRepository newsArticleRepository,
+                             IntelligenceRepository intelligenceRepository,
+                             IntelligenceArticleRepository intelligenceArticleRepository,
                              RestTemplate restTemplate) {
         this.vectorSearchService = vectorSearchService;
         this.newsArticleRepository = newsArticleRepository;
+        this.intelligenceRepository = intelligenceRepository;
+        this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.restTemplate = restTemplate;
     }
 
-    public QueryResult query(String userQuestion) {
-        List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 15);
-        List<NewsArticle> relatedArticles = articleIds.stream()
-                .map(newsArticleRepository::findById)
-                .filter(java.util.Optional::isPresent)
-                .map(java.util.Optional::get)
-                .toList();
+    /**
+     * 混合检索：语义搜索新闻 → 映射到情报 + 关键词搜索情报，合并去重，按相关度排序。
+     * 返回情报列表（信息密度远高于原始新闻）。
+     */
+    private List<RankedIntelligence> hybridSearch(String question, int maxResults) {
+        Map<Long, Double> intelScores = new LinkedHashMap<>();
 
-        if (relatedArticles.isEmpty()) {
-            return new QueryResult("\u6682\u65e0\u76f8\u5173\u65b0\u95fb\u6570\u636e\uff0c\u8bf7\u5148\u91c7\u96c6\u65b0\u95fb\u3002", List.of(), 0);
+        // 1. 语义搜索：搜新闻向量 → 映射到情报，取最高相似度
+        try {
+            List<VectorSearchService.ScoredId> scored = vectorSearchService.semanticSearchWithScores(question, 30);
+            for (VectorSearchService.ScoredId s : scored) {
+                if (s.score() < MIN_SIMILARITY) continue;
+                List<IntelligenceArticle> links = intelligenceArticleRepository.findByArticleId(s.id());
+                for (IntelligenceArticle link : links) {
+                    intelScores.merge(link.getIntelligenceId(), s.score(), Math::max);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("语义搜索失败: {}", e.getMessage());
         }
 
-        String newsContext = relatedArticles.stream()
-                .map(a -> {
-                    String body = a.getSummary() != null && !a.getSummary().isBlank()
-                            ? a.getSummary()
-                            : (a.getContent() != null && a.getContent().length() > 200
-                                    ? a.getContent().substring(0, 200) + "..."
-                                    : a.getContent());
-                    return String.format("[%s|%s] %s \u2014 %s",
-                            a.getSourceName(),
-                            a.getCredibilityLevel() != null ? a.getCredibilityLevel() : "unknown",
-                            a.getTitle(),
-                            body);
-                })
-                .collect(Collectors.joining("\n"));
+        // 2. 关键词 fallback：搜情报标题/摘要/标签，基础分 0.35
+        try {
+            List<Intelligence> keywordResults = intelligenceRepository.searchByKeyword(question.trim());
+            for (Intelligence intel : keywordResults) {
+                intelScores.putIfAbsent(intel.getId(), 0.35);
+            }
+        } catch (Exception e) {
+            log.warn("关键词搜索失败: {}", e.getMessage());
+        }
 
-        String systemPrompt = "\u4f60\u662f\u300c\u534e\u5c14\u8857\u4e4b\u773c\u300dAI\u6295\u7814\u52a9\u624b\uff0c\u4e13\u6ce8AI\u4e0e\u79d1\u6280\u6295\u8d44\u9886\u57df\u3002\n"
-                + "\u57fa\u4e8e\u63d0\u4f9b\u7684\u65b0\u95fb\u6570\u636e\u56de\u7b54\u7528\u6237\u95ee\u9898\u3002\u8981\u6c42\uff1a\n"
-                + "1. \u6807\u6ce8\u4fe1\u606f\u6765\u6e90\u53ca\u53ef\u4fe1\u5ea6\n"
-                + "2. \u533a\u5206\u4e8b\u5b9e\u4e0e\u89c2\u70b9\n"
-                + "3. \u7ed9\u51fa\u6295\u8d44\u76f8\u5173\u7684\u5206\u6790\u548c\u5efa\u8bae\n"
-                + "4. \u5982\u679c\u4fe1\u606f\u4e0d\u8db3\uff0c\u660e\u786e\u8bf4\u660e";
+        if (intelScores.isEmpty()) return List.of();
+
+        // 3. 批量查询情报，按相关度排序
+        List<Intelligence> intels = intelligenceRepository.findAllById(intelScores.keySet());
+        return intels.stream()
+                .map(i -> new RankedIntelligence(i, intelScores.getOrDefault(i.getId(), 0.0)))
+                .sorted((a, b) -> Double.compare(b.score, a.score))
+                .limit(maxResults)
+                .toList();
+    }
+
+    record RankedIntelligence(Intelligence intel, double score) {}
+
+    /**
+     * 将情报列表构建为 LLM 上下文（比原始新闻信息密度高得多）
+     */
+    private String buildIntelContext(List<RankedIntelligence> ranked) {
+        return ranked.stream().map(r -> {
+            Intelligence i = r.intel;
+            String body = i.getSummary() != null && !i.getSummary().isBlank()
+                    ? i.getSummary()
+                    : (i.getContent() != null && i.getContent().length() > 300
+                            ? i.getContent().substring(0, 300) + "..." : "");
+            return String.format("[%s|%s|%d源|相关度%.0f%%] %s — %s",
+                    i.getPrimarySource() != null ? i.getPrimarySource() : "未知",
+                    i.getCredibilityLevel() != null ? i.getCredibilityLevel() : "unknown",
+                    i.getSourceCount() != null ? i.getSourceCount() : 1,
+                    r.score * 100,
+                    i.getTitle(),
+                    body);
+        }).collect(Collectors.joining("\n\n"));
+    }
+
+    /** 构建 meta 数据（返回给前端展示的情报摘要） */
+    private Map<String, Object> buildMeta(List<RankedIntelligence> ranked) {
+        return Map.of(
+                "matchedCount", ranked.size(),
+                "relatedNews", ranked.stream().map(r -> {
+                    Intelligence i = r.intel;
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", i.getId());
+                    m.put("title", i.getTitle());
+                    m.put("sourceName", i.getPrimarySource() != null ? i.getPrimarySource() : "");
+                    m.put("credibilityLevel", i.getCredibilityLevel() != null ? i.getCredibilityLevel() : "unknown");
+                    m.put("sourceCount", i.getSourceCount() != null ? i.getSourceCount() : 1);
+                    m.put("sourceUrl", ""); // 情报无直接 URL
+                    m.put("relevance", Math.round(r.score * 100));
+                    return m;
+                }).toList()
+        );
+    }
+
+    public QueryResult query(String userQuestion) {
+        List<RankedIntelligence> ranked = hybridSearch(userQuestion, 10);
+
+        if (ranked.isEmpty()) {
+            return new QueryResult("暂无相关情报数据，请先采集新闻。", List.of(), 0);
+        }
+
+        String context = buildIntelContext(ranked);
+
+        String systemPrompt = "你是「华尔街之眼」AI投研助手，专注AI与科技投资领域。\n"
+                + "基于提供的情报数据回答用户问题。要求：\n"
+                + "1. 标注信息来源及可信度\n"
+                + "2. 区分事实与观点\n"
+                + "3. 给出投资相关的分析和建议\n"
+                + "4. 如果信息不足，明确说明";
 
         String userPrompt = String.format(
-                "## \u76f8\u5173\u65b0\u95fb\uff08\u5171%d\u6761\uff0c\u6309\u8bed\u4e49\u76f8\u5173\u5ea6\u6392\u5e8f\uff09\n\n%s\n\n## \u7528\u6237\u95ee\u9898\n%s\n\n\u8bf7\u57fa\u4e8e\u4ee5\u4e0a\u65b0\u95fb\u6570\u636e\u8fdb\u884c\u5206\u6790\u548c\u56de\u7b54\u3002",
-                relatedArticles.size(), newsContext, userQuestion);
+                "## 相关情报（共%d条，按相关度排序，已聚合去重）\n\n%s\n\n## 用户问题\n%s\n\n请基于以上情报数据进行分析和回答。",
+                ranked.size(), context, userQuestion);
+
+        // 兼容旧的 relatedNews 字段（用情报的关联新闻填充）
+        List<NewsArticle> relatedArticles = ranked.stream()
+                .flatMap(r -> intelligenceArticleRepository
+                        .findByIntelligenceIdOrderByIsPrimaryDesc(r.intel.getId()).stream()
+                        .map(link -> newsArticleRepository.findById(link.getArticleId()).orElse(null)))
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(15)
+                .toList();
 
         try {
             String answer = callLlm(systemPrompt, userPrompt);
-            return new QueryResult(answer, relatedArticles, relatedArticles.size());
+            return new QueryResult(answer, relatedArticles, ranked.size());
         } catch (Exception e) {
             log.error("LLM query failed: {}", e.getMessage());
-            return new QueryResult("AI\u5206\u6790\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528: " + e.getMessage(), relatedArticles, relatedArticles.size());
+            return new QueryResult("AI分析服务暂时不可用: " + e.getMessage(), relatedArticles, ranked.size());
         }
     }
 
@@ -135,51 +220,24 @@ public class SmartQueryService {
      */
     public void streamQuery(String userQuestion, SseEmitter emitter) {
         try {
-            // 1. Semantic search (same as sync)
-            List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 15);
-            List<NewsArticle> relatedArticles = articleIds.stream()
-                    .map(newsArticleRepository::findById)
-                    .filter(java.util.Optional::isPresent)
-                    .map(java.util.Optional::get)
-                    .toList();
+            // 1. 混合检索：语义搜索 + 关键词 fallback → 情报级别
+            List<RankedIntelligence> ranked = hybridSearch(userQuestion, 10);
 
             // 2. Emit metadata first
-            Map<String, Object> meta = Map.of(
-                    "matchedCount", relatedArticles.size(),
-                    "relatedNews", relatedArticles.stream().map(n -> Map.of(
-                            "id", n.getId(),
-                            "title", n.getTitle(),
-                            "sourceName", n.getSourceName() != null ? n.getSourceName() : "",
-                            "credibilityLevel", n.getCredibilityLevel() != null ? n.getCredibilityLevel() : "unknown",
-                            "sourceUrl", n.getSourceUrl() != null ? n.getSourceUrl() : ""
-                    )).toList()
-            );
-            emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
+            emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(buildMeta(ranked))));
 
-            if (relatedArticles.isEmpty()) {
-                emitter.send(SseEmitter.event().name("token").data("暂无相关新闻数据，请先采集新闻。"));
+            if (ranked.isEmpty()) {
+                emitter.send(SseEmitter.event().name("token").data("暂无相关情报数据，请先采集新闻。"));
                 emitter.send(SseEmitter.event().name("done").data(""));
                 emitter.complete();
                 return;
             }
 
-            // 3. Build prompt (same as sync)
-            String newsContext = relatedArticles.stream()
-                    .map(a -> {
-                        String body = a.getSummary() != null && !a.getSummary().isBlank()
-                                ? a.getSummary()
-                                : (a.getContent() != null && a.getContent().length() > 200
-                                        ? a.getContent().substring(0, 200) + "..."
-                                        : a.getContent());
-                        return String.format("[%s|%s] %s — %s",
-                                a.getSourceName(),
-                                a.getCredibilityLevel() != null ? a.getCredibilityLevel() : "unknown",
-                                a.getTitle(), body);
-                    })
-                    .collect(Collectors.joining("\n"));
+            // 3. Build prompt with intelligence-level context
+            String context = buildIntelContext(ranked);
 
             String systemPrompt = "你是「华尔街之眼」AI投研助手，专注AI与科技投资领域。\n"
-                    + "基于提供的新闻数据回答用户问题。\n\n"
+                    + "基于提供的情报数据回答用户问题。每条情报已经过多来源聚合和去重。\n\n"
                     + "输出格式要求（Markdown）：\n"
                     + "1. 先用 2-3 句话给出**核心结论**\n"
                     + "2. 用 ## 二级标题分段组织内容（如 ## 事件概述、## 市场影响、## 投资建议）\n"
@@ -190,8 +248,8 @@ public class SmartQueryService {
                     + "7. 如果信息不足，明确说明";
 
             String userPrompt = String.format(
-                    "## 相关新闻（共%d条，按语义相关度排序）\n\n%s\n\n## 用户问题\n%s\n\n请基于以上新闻数据进行分析和回答。",
-                    relatedArticles.size(), newsContext, userQuestion);
+                    "## 相关情报（共%d条，按相关度排序，已聚合去重）\n\n%s\n\n## 用户问题\n%s\n\n请基于以上情报数据进行分析和回答。",
+                    ranked.size(), context, userQuestion);
 
             // 4. Call LLM with stream=true
             Map<String, Object> reqBody = Map.of(
@@ -230,12 +288,25 @@ public class SmartQueryService {
 
             log.info("LLM stream connected, reading chunks...");
             boolean anyTokenSent = false;
+            int chunkCount = 0;
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    if (!line.startsWith("data: ")) continue;
-                    String data = line.substring(6).trim();
+                    // Log first 5 raw lines for debugging
+                    if (chunkCount < 5) {
+                        log.info("LLM raw line [{}]: {}", chunkCount, line.length() > 300 ? line.substring(0, 300) + "..." : line);
+                    }
+                    chunkCount++;
+                    // Support both "data: " and "data:" (some LLM platforms omit the space)
+                    String data;
+                    if (line.startsWith("data: ")) {
+                        data = line.substring(6).trim();
+                    } else if (line.startsWith("data:")) {
+                        data = line.substring(5).trim();
+                    } else {
+                        continue;
+                    }
                     if ("[DONE]".equals(data)) break;
                     try {
                         JsonNode chunk = objectMapper.readTree(data);
@@ -267,8 +338,10 @@ public class SmartQueryService {
             }
 
             if (!anyTokenSent) {
-                log.warn("LLM stream finished but no token/reasoning was emitted");
+                log.warn("LLM stream finished but no token/reasoning was emitted. Total lines read: {}", chunkCount);
                 emitter.send(SseEmitter.event().name("token").data("AI 未返回有效内容，可能是模型名称配置有误或服务暂时不可用。"));
+            } else {
+                log.info("LLM stream completed. Total lines: {}", chunkCount);
             }
 
             emitter.send(SseEmitter.event().name("done").data(""));

@@ -1266,7 +1266,7 @@ async function doQuery() {
       const metaEl = document.getElementById('queryMeta');
       metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px">
         <span style="font-size:14px">🔍</span>
-        <span style="font-size:13px;color:#c4b5fd">语义匹配到 <b style="color:#ffd700">${meta.matchedCount}</b> 条相关新闻，正在生成分析...</span>
+        <span style="font-size:13px;color:#c4b5fd">语义匹配到 <b style="color:#ffd700">${meta.matchedCount}</b> 条相关情报，正在生成分析...</span>
       </div>`;
       btn.textContent = '⏳ 生成中...';
 
@@ -1275,15 +1275,18 @@ async function doQuery() {
         const newsEl = document.getElementById('queryRelatedNews');
         let html = `<details style="margin-top:4px">
           <summary style="font-size:13px;color:#8890b5;cursor:pointer;padding:8px 0;user-select:none;display:flex;align-items:center;gap:6px">
-            <span>📎</span> 参考新闻来源 (${meta.relatedNews.length}条)
+            <span>📎</span> 参考情报来源 (${meta.relatedNews.length}条聚合情报)
           </summary>
           <div style="display:grid;gap:6px;padding:8px 0">`;
         meta.relatedNews.forEach(function(n) {
           const credColor = n.credibilityLevel === 'authoritative' ? '#065f46' : n.credibilityLevel === 'normal' ? '#92400e' : '#6b7280';
+          const srcCount = n.sourceCount > 1 ? ' · ' + n.sourceCount + '源' : '';
+          const relevance = n.relevance ? n.relevance + '%' : '';
           html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#0d1235;border:1px solid #1e2555;border-radius:8px">
             <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${credColor};color:#fff;white-space:nowrap">${esc(n.credibilityLevel || '')}</span>
-            <span style="font-size:12px;color:#8890b5;white-space:nowrap">${esc(n.sourceName)}</span>
+            <span style="font-size:12px;color:#8890b5;white-space:nowrap">${esc(n.sourceName)}${srcCount}</span>
             <span style="font-size:12px;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.title)}</span>
+            ${relevance ? '<span style="font-size:11px;color:#fbbf24;white-space:nowrap">' + relevance + '</span>' : ''}
             ${n.sourceUrl ? '<a href="' + esc(n.sourceUrl) + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:11px;white-space:nowrap">原文↗</a>' : ''}
           </div>`;
         });
@@ -1330,7 +1333,7 @@ async function doQuery() {
     abortBtn.style.display = 'none';
     // Final render without cursor
     document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText);
-    document.getElementById('queryAnswerLabel').textContent = 'AI 分析结果（基于 ' + matchedCount + ' 条新闻）';
+    document.getElementById('queryAnswerLabel').textContent = 'AI 分析结果（基于 ' + matchedCount + ' 条情报）';
     // Finalize thinking block label
     if (!firstReasoning) {
       document.getElementById('queryThinkingLabel').textContent = '思考过程（' + reasoningText.length + '字）';
@@ -1340,7 +1343,7 @@ async function doQuery() {
     if (metaEl) {
       metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px">
         <span style="font-size:14px">✅</span>
-        <span style="font-size:13px;color:#4ade80">分析完成，基于 <b style="color:#ffd700">${matchedCount}</b> 条新闻生成</span>
+        <span style="font-size:13px;color:#4ade80">分析完成，基于 <b style="color:#ffd700">${matchedCount}</b> 条情报生成</span>
       </div>`;
     }
   });
