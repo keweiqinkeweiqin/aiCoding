@@ -33,6 +33,7 @@ public class EventClusterService {
     private final NewsArticleRepository newsArticleRepository;
     private final DeduplicationService deduplicationService;
     private final EmbeddingClient embeddingClient;
+    private final VectorSearchService vectorSearchService;
     private final ChatClient chatClient;
     private final IntelligenceService intelligenceService;
 
@@ -44,6 +45,7 @@ public class EventClusterService {
                                NewsArticleRepository newsArticleRepository,
                                DeduplicationService deduplicationService,
                                EmbeddingClient embeddingClient,
+                               VectorSearchService vectorSearchService,
                                ChatClient.Builder chatClientBuilder,
                                IntelligenceService intelligenceService) {
         this.intelligenceRepository = intelligenceRepository;
@@ -51,6 +53,7 @@ public class EventClusterService {
         this.newsArticleRepository = newsArticleRepository;
         this.deduplicationService = deduplicationService;
         this.embeddingClient = embeddingClient;
+        this.vectorSearchService = vectorSearchService;
         this.chatClient = chatClientBuilder.build();
         this.intelligenceService = intelligenceService;
     }
@@ -107,6 +110,7 @@ public class EventClusterService {
                     float[] vec = embeddingClient.embed(embText);
                     if (vec != null && vec.length > 0) {
                         intelEmbeddingCache.put(intel.getId(), vec);
+                        vectorSearchService.addIntelVector(intel.getId(), vec);
                         try {
                             com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
                             List<Float> fl = new ArrayList<>();
@@ -395,6 +399,7 @@ public class EventClusterService {
             float[] vec = embeddingClient.embed(text);
             if (vec != null && vec.length > 0) {
                 intelEmbeddingCache.put(intel.getId(), vec);
+                vectorSearchService.addIntelVector(intel.getId(), vec);
                 com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
                 List<Float> fl = new ArrayList<>();
                 for (float v : vec) fl.add(v);

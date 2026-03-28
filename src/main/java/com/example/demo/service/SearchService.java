@@ -2,9 +2,7 @@ package com.example.demo.service;
 
 import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.Intelligence;
-import com.example.demo.model.IntelligenceArticle;
 import com.example.demo.model.TrendingSearch;
-import com.example.demo.repository.IntelligenceArticleRepository;
 import com.example.demo.repository.IntelligenceRepository;
 import com.example.demo.repository.TrendingSearchRepository;
 import org.slf4j.Logger;
@@ -22,23 +20,20 @@ public class SearchService {
     private static final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     private final IntelligenceRepository intelligenceRepository;
-    private final IntelligenceArticleRepository intelligenceArticleRepository;
     private final VectorSearchService vectorSearchService;
     private final TrendingSearchRepository trendingSearchRepository;
 
     public SearchService(IntelligenceRepository intelligenceRepository,
-                         IntelligenceArticleRepository intelligenceArticleRepository,
                          VectorSearchService vectorSearchService,
                          TrendingSearchRepository trendingSearchRepository) {
         this.intelligenceRepository = intelligenceRepository;
-        this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.vectorSearchService = vectorSearchService;
         this.trendingSearchRepository = trendingSearchRepository;
     }
 
     /**
-     * 搜索情报：语义搜索 + 关键词模糊匹配，合并去重，支持排序和分页。
-     * relevance 排序基于语义相似度分数（情报取其关联文章的最高相似度）。
+     * 搜索情报：直接搜情报向量 + 关键词模糊匹配，合并去重，支持排序和分页。
+     * relevance 排序基于情报向量的语义相似度分数。
      */
     public SearchResult search(String keyword, int page, int size, String sortBy) {
         if (keyword == null || keyword.isBlank()) {
@@ -47,19 +42,14 @@ public class SearchService {
 
         recordTrending(keyword.trim());
 
-        // 1. 语义搜索 — 带分数，映射到情报
-        // key=intelligenceId, value=该情报下所有关联文章的最高相似度
+        // 1. 语义搜索 — 直接搜情报向量，返回 intelligenceId + 相似度分数
         Map<Long, Double> intelRelevanceScores = new LinkedHashMap<>();
 
         try {
             List<VectorSearchService.ScoredId> scored =
-                    vectorSearchService.semanticSearchWithScores(keyword, 50);
+                    vectorSearchService.searchIntelligences(keyword, 50);
             for (VectorSearchService.ScoredId s : scored) {
-                List<IntelligenceArticle> links =
-                        intelligenceArticleRepository.findByArticleId(s.id());
-                for (IntelligenceArticle link : links) {
-                    intelRelevanceScores.merge(link.getIntelligenceId(), s.score(), Math::max);
-                }
+                intelRelevanceScores.put(s.id(), s.score());
             }
         } catch (Exception e) {
             log.warn("语义搜索失败，降级为纯关键词搜索: {}", e.getMessage());

@@ -71,15 +71,12 @@ public class SmartQueryService {
     private List<RankedIntelligence> hybridSearch(String question, int maxResults) {
         Map<Long, Double> intelScores = new LinkedHashMap<>();
 
-        // 1. 语义搜索：搜新闻向量 → 映射到情报，取最高相似度
+        // 1. 语义搜索：直接搜情报向量，返回 intelligenceId + 相似度分数
         try {
-            List<VectorSearchService.ScoredId> scored = vectorSearchService.semanticSearchWithScores(question, 30);
+            List<VectorSearchService.ScoredId> scored = vectorSearchService.searchIntelligences(question, 30);
             for (VectorSearchService.ScoredId s : scored) {
                 if (s.score() < MIN_SIMILARITY) continue;
-                List<IntelligenceArticle> links = intelligenceArticleRepository.findByArticleId(s.id());
-                for (IntelligenceArticle link : links) {
-                    intelScores.merge(link.getIntelligenceId(), s.score(), Math::max);
-                }
+                intelScores.put(s.id(), s.score());
             }
         } catch (Exception e) {
             log.warn("语义搜索失败: {}", e.getMessage());
