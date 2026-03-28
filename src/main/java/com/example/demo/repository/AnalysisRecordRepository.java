@@ -12,4 +12,6 @@ public interface AnalysisRecordRepository extends JpaRepository<AnalysisRecord, 
             Long userId, Long newsArticleId);
 
     List<AnalysisRecord> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    void deleteByUserId(Long userId);
 }

@@ -2,9 +2,11 @@ package com.example.demo.controller;
 
 import com.example.demo.model.UserHolding;
 import com.example.demo.model.UserProfile;
+import com.example.demo.repository.AnalysisRecordRepository;
 import com.example.demo.repository.UserHoldingRepository;
 import com.example.demo.repository.UserProfileRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -16,11 +18,14 @@ public class ProfileController {
 
     private final UserProfileRepository userProfileRepository;
     private final UserHoldingRepository userHoldingRepository;
+    private final AnalysisRecordRepository analysisRecordRepository;
 
     public ProfileController(UserProfileRepository userProfileRepository,
-                             UserHoldingRepository userHoldingRepository) {
+                             UserHoldingRepository userHoldingRepository,
+                             AnalysisRecordRepository analysisRecordRepository) {
         this.userProfileRepository = userProfileRepository;
         this.userHoldingRepository = userHoldingRepository;
+        this.analysisRecordRepository = analysisRecordRepository;
     }
 
     /**
@@ -55,6 +60,7 @@ public class ProfileController {
      * holdings 接受对象数组 [{stockCode, stockName, sector}]
      */
     @PutMapping
+    @Transactional
     public ResponseEntity<Map<String, Object>> saveProfile(
             @RequestParam(defaultValue = "1") Long userId,
             @RequestBody Map<String, Object> body) {
@@ -119,6 +125,9 @@ public class ProfileController {
         }
 
         userProfileRepository.save(profile);
+
+        // 画像变更后清除该用户的个性化分析缓存，下次访问时会用新画像重新生成
+        analysisRecordRepository.deleteByUserId(userId);
 
         // 返回保存后的完整画像（含持仓），前端无需再发一次 GET
         Map<String, Object> data = new LinkedHashMap<>();

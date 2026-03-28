@@ -33,12 +33,11 @@ Response:
 
 ### GET /api/home — 首页聚合数据
 
-Params: `?userId=1&hours=24`
+Params: `?userId=1`
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | userId | 0 | 用户ID，不传或传 0 则为访客 |
-| hours | 24 | 查询最近N小时的情报，优先基于 `latestArticleTime` 过滤，无数据时 fallback 到 `createdAt`；greeting 和 marketOverview 共用同一时间窗口 |
 
 Response:
 ```json
@@ -77,7 +76,7 @@ Response:
 - 未登录时 nickname 为"访客"，profileTag 为空
 - sentimentLabel 取值：偏多 / 中性 / 偏空
 - marketStatus 取值：与 sentimentLabel 一致，市场情绪偏多/偏空/中性 + 情报数量；无数据时返回"暂无最新情报，请先采集数据"
-- greeting.marketStatus 和 marketOverview 基于同一份情报数据计算（由 `hours` 参数控制时间窗口），确保情绪判断一致
+- greeting.marketStatus 和 marketOverview 基于全量情报数据计算（不按时间窗口过滤），确保情绪判断一致
 - hotTags 中的英文标签会自动翻译为中文（如 chip→芯片、semiconductor→半导体、robot→机器人、cloud→云计算、LLM→大模型等），未在映射表中的标签保持原样
 - 首页不再内嵌推荐情报列表，情报数据请通过 `GET /api/intelligences` 单独获取
 

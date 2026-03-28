@@ -11,7 +11,6 @@ import com.example.demo.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.*;
 
 @RestController
@@ -61,18 +60,10 @@ public class HomeController {
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> home(
-            @RequestParam(defaultValue = "0") Long userId,
-            @RequestParam(defaultValue = "24") int hours) {
+            @RequestParam(defaultValue = "0") Long userId) {
 
-        // 统一时间窗口：greeting 和 marketOverview 使用同一份情报数据
-        // 优先按 latestArticleTime 过滤（合并新文章后会更新），fallback 到 createdAt
-        LocalDateTime since = LocalDateTime.now().minusHours(hours);
-        List<Intelligence> recent = intelligenceRepository
-                .findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(since);
-        if (recent.isEmpty()) {
-            recent = intelligenceRepository
-                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since);
-        }
+        // 使用全量情报数据，不再按时间窗口过滤
+        List<Intelligence> recent = intelligenceRepository.findAll();
 
         Map<String, Object> data = new LinkedHashMap<>();
 
