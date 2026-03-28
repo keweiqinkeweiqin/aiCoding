@@ -612,6 +612,16 @@ function initProfilePanel() {
     <!-- User list (loaded on demand) -->
     <div id="userListSection" style="margin-bottom:16px"></div>
 
+    <!-- Nickname editing -->
+    <div style="margin-bottom:16px;padding:14px;background:#151a40;border:1px solid #2a3070;border-radius:10px">
+      <div class="profile-field" style="margin-bottom:0">
+        <label>昵称</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="profileNickname" class="input" style="width:240px" placeholder="输入昵称">
+        </div>
+      </div>
+    </div>
+
     <!-- Profile form -->
     <div class="profile-grid">
       <div>
@@ -737,6 +747,13 @@ async function loadProfile() {
   } catch (e) {
     profileData = {};
   }
+  // Load nickname
+  try {
+    const r = await fetch(API + '/api/auth/me?userId=' + currentUserId);
+    const d = await r.json();
+    const nickInput = document.getElementById('profileNickname');
+    if (nickInput && d.data) nickInput.value = d.data.nickname || '';
+  } catch (_) {}
   renderProfileForm();
   loadHoldings();
 }
@@ -793,6 +810,17 @@ async function saveProfile() {
   btn.textContent = '⏳ 保存中...';
 
   try {
+    // Save nickname
+    const nickname = (document.getElementById('profileNickname')?.value || '').trim();
+    if (nickname) {
+      await fetch(API + '/api/auth/me?userId=' + currentUserId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname })
+      });
+    }
+
+    // Save profile
     const r = await fetch(API + '/api/profile?userId=' + currentUserId, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -805,6 +833,8 @@ async function saveProfile() {
     await r.json();
     status.innerHTML = '<span style="color:#22c55e">✅ 画像已保存</span>';
     setTimeout(() => { if (status) status.innerHTML = ''; }, 3000);
+    // Refresh user list to show updated nickname
+    loadUserList();
   } catch (e) {
     status.innerHTML = `<span style="color:#ef4444">❌ 保存失败: ${e.message}</span>`;
   }
