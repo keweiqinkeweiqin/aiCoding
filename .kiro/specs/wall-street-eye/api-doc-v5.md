@@ -33,7 +33,12 @@ Response:
 
 ### GET /api/home — 首页聚合数据
 
-Params: `?userId=1`（可选，不传或传 0 则为访客）
+Params: `?userId=1&hours=24`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| userId | 0 | 用户ID，不传或传 0 则为访客 |
+| hours | 24 | 查询最近N小时的情报，优先基于 `latestArticleTime` 过滤，无数据时 fallback 到 `createdAt`；greeting 和 marketOverview 共用同一时间窗口 |
 
 Response:
 ```json
@@ -72,6 +77,7 @@ Response:
 - 未登录时 nickname 为"访客"，profileTag 为空
 - sentimentLabel 取值：偏多 / 中性 / 偏空
 - marketStatus 取值：与 sentimentLabel 一致，市场情绪偏多/偏空/中性 + 情报数量；无数据时返回"暂无最新情报，请先采集数据"
+- greeting.marketStatus 和 marketOverview 基于同一份情报数据计算（由 `hours` 参数控制时间窗口），确保情绪判断一致
 - hotTags 中的英文标签会自动翻译为中文（如 chip→芯片、semiconductor→半导体、robot→机器人、cloud→云计算、LLM→大模型等），未在映射表中的标签保持原样
 - 首页不再内嵌推荐情报列表，情报数据请通过 `GET /api/intelligences` 单独获取
 
@@ -92,6 +98,13 @@ Params: `?userId=1&hours=24&page=0&size=20&scene=home`
 | scene | home | `home`: C端首页模式；`admin`: 控制面板模式 |
 
 scene=home（默认）：个性化排序后取前 3 条，不分页。
+
+个性化排序算法：
+- 标签匹配用户关注领域: +10分/个（支持中英文双向匹配，如用户关注"芯片"也会匹配标签"chip"，反之亦然）
+- 关联股票匹配用户持仓: +20分/个
+- 高优先级(high): +5分
+- 多来源(sourceCount>1): +3分
+- 同分按时间倒序
 
 Response (scene=home):
 ```json
@@ -246,7 +259,12 @@ Response:
 
 ### GET /api/insight — 洞察聚合数据
 
-Params: `?days=7`
+Params: `?days=7&eventLimit=20`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| days | 7 | 查询最近N天的情报，优先基于 `latestArticleTime` 过滤，无数据时 fallback 到 `createdAt` |
+| eventLimit | 20 | events 模块返回的最大条数 |
 
 Response:
 ```json
@@ -657,6 +675,88 @@ Response:
 说明：
 - `cleared`: 被清空 content 的情报数量
 - 清空后不会立即重新生成，而是在用户访问 `GET /api/intelligences/{id}` 时按需生成
+
+### POST /api/intelligences/batch-generate-content — 批量并发生成情报正文
+
+对所有 `content` 为空的情报，并发调用 LLM 生成正文。适用于采集聚类后、C 端用户访问前，提前预热缓存，避免用户首次打开详情页长时间等待。
+
+Params: `?concurrency=3`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| concurrency | 3 | 并发线程数，上限 10 |
+
+Response:
+```json
+{ "code": 200, "data": { "total": 15, "success": 14, "failed": 1 } }
+```
+
+说明：
+- `total`: 需要生成正文的情报数量（content 为空的）
+- `success`: 成功生成的数量
+- `failed`: LLM 调用失败的数量
+- 该接口为同步阻塞调用，情报数量多时耗时较长（每条约 5-15 秒），建议在控制面板手动触发
+- 已有 content 的情报不会重复生成；如需全部重新生成，先调用 `refresh-content` 清空再调用此接口
+- 典型使用流程：`POST /news/collect`（采集）→ `POST /intelligences/cluster`（聚类）→ `POST /intelligences/batch-generate-content`（预生成正文）
+
+### POST /api/intelligences/batch-generate-content — 批量并发生成情报正文
+
+对所有 `content` 为空的情报批量调用 LLM 生成正文，避免 C 端用户首次访问时长时间等待。
+
+Params: `?concurrency=3`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| concurrency | 3 | 并发线程数，最大 10 |
+
+Response:
+```json
+{ "code": 200, "data": { "total": 15, "success": 13, "failed": 2 } }
+```
+
+说明：
+- `total`: 需要生成正文的情报数量（content 为空的）
+- `success`: 成功生成的数量
+- `failed`: 生成失败的数量
+- 适合在 `refresh-content` 清空缓存后调用，或首次聚类后批量预热
+
+### GET /api/intelligences/batch-generate-content/stream — 批量生成正文（SSE 流式进度）
+
+与 `POST /api/intelligences/batch-generate-content` 功能相同，但通过 SSE 事件流实时推送每条情报的生成进度，适合前端展示进度条。
+
+Params: `?concurrency=3`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| concurrency | 3 | 并发线程数，最大 10 |
+
+返回 SSE 事件流，超时时间 10 分钟。
+
+说明：
+- 逐条推送生成进度，前端可实时展示已完成/失败数量
+- 适合情报数量较多时使用，避免同步接口长时间无响应
+
+### POST /api/news/batch-credibility — 批量并发重算置信度
+
+对所有新闻重新执行四维置信度评估（来源权威性 + LLM情感置信度 + 时效性 + 交叉验证），更新 `credibilityScore` 和 `credibilityLevel`。适用于调整评估算法后批量刷新。
+
+Params: `?concurrency=3`
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| concurrency | 3 | 并发线程数，最大 10 |
+
+Response:
+```json
+{ "code": 200, "data": { "total": 120, "success": 118, "failed": 2 } }
+```
+
+说明：
+- `total`: 需要重算的新闻总数
+- `success`: 成功重算的数量
+- `failed`: 重算失败的数量
+- 重算后关联情报的置信度需通过重新聚类（`POST /intelligences/cluster`）或下次采集时自动更新
+- 典型使用流程：调整置信度算法后 → `POST /news/batch-credibility`（重算新闻置信度）→ `POST /intelligences/cluster`（重新聚类更新情报置信度）
 
 说明：定时任务已启用，新闻每 15 分钟自动采集，行情每 5 分钟自动采集。
 

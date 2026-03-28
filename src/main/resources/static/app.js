@@ -109,6 +109,7 @@ function initCollectPanel() {
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="collectNews()" class="btn btn-primary" id="btnCollectNews">📡 采集新闻</button>
       <button onclick="collectMarket()" class="btn btn-success" id="btnCollectMarket">📈 采集行情</button>
+      <button onclick="batchCredibility()" class="btn btn-purple" id="btnBatchCred">🔒 重算置信度</button>
       <button onclick="document.getElementById('collectLog').textContent=''" class="btn btn-ghost">🗑️ 清空日志</button>
     </div>
     <div id="collectLog" class="log-console" style="min-height:200px;max-height:500px"></div>
@@ -153,6 +154,24 @@ async function collectMarket() {
     loadStats();
   } catch (e) { logCollect('❌ 采集失败: ' + e.message); }
   btn.disabled = false;
+}
+
+async function batchCredibility() {
+  const btn = document.getElementById('btnBatchCred');
+  btn.disabled = true;
+  btn.textContent = '⏳ 计算中...';
+  logCollect('开始批量重算置信度...');
+  const t0 = performance.now();
+  try {
+    const r = await fetch(API + '/api/news/batch-credibility?concurrency=5', { method: 'POST' });
+    const d = await r.json();
+    const ms = Math.round(performance.now() - t0);
+    const data = d.data || {};
+    logCollect(`✅ 置信度重算完成: 共${data.total}条, 成功${data.success}条, 失败${data.failed}条 (${(ms/1000).toFixed(1)}s)`);
+    loadStats();
+  } catch (e) { logCollect('❌ 重算失败: ' + e.message); }
+  btn.disabled = false;
+  btn.textContent = '🔒 重算置信度';
 }
 
 // ============================================================
@@ -224,10 +243,12 @@ function initIntelPanel() {
       <div class="section-title" style="margin-bottom:0">🔍 情报中心</div>
       <div style="display:flex;gap:8px">
         <button onclick="triggerCluster()" class="btn btn-purple" id="btnCluster">🔄 手动聚类</button>
+        <button onclick="batchGenerateContent()" class="btn btn-primary" id="btnBatchGen">⚡ 批量生成正文</button>
         <button onclick="refreshContent()" class="btn btn-success" id="btnRefresh">🔃 刷新正文</button>
         <button onclick="loadIntelligences()" class="btn btn-ghost">刷新</button>
       </div>
     </div>
+    <div id="batchGenStatus" style="margin-bottom:12px"></div>
     <div id="intelList" style="min-height:200px"></div>
   `;
 }
@@ -259,6 +280,144 @@ async function refreshContent() {
   } catch (e) { alert('刷新失败: ' + e.message); }
   btn.disabled = false;
   btn.textContent = '🔃 刷新正文';
+}
+
+async function batchGenerateContent() {
+  const btn = document.getElementById('btnBatchGen');
+  const statusEl = document.getElementById('batchGenStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+  const t0 = performance.now();
+
+  // 初始化监控面板
+  statusEl.innerHTML = `<div id="batchMonitor" style="padding:16px;background:#0d1235;border:1px solid #2a3070;border-radius:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:14px;color:#ffd700;font-weight:600">⚡ 批量生成监控</span>
+      <span id="batchTimer" style="font-size:12px;color:#6b7280">0.0s</span>
+    </div>
+    <div style="display:flex;gap:16px;margin-bottom:12px">
+      <div style="text-align:center;flex:1;padding:8px;background:#151a40;border-radius:8px">
+        <div id="batchTotal" style="font-size:20px;font-weight:700;color:#8890b5">-</div>
+        <div style="font-size:11px;color:#6b7280">待生成</div>
+      </div>
+      <div style="text-align:center;flex:1;padding:8px;background:#151a40;border-radius:8px">
+        <div id="batchSuccess" style="font-size:20px;font-weight:700;color:#4ade80">0</div>
+        <div style="font-size:11px;color:#6b7280">成功</div>
+      </div>
+      <div style="text-align:center;flex:1;padding:8px;background:#151a40;border-radius:8px">
+        <div id="batchFailed" style="font-size:20px;font-weight:700;color:#f87171">0</div>
+        <div style="font-size:11px;color:#6b7280">失败</div>
+      </div>
+      <div style="text-align:center;flex:1;padding:8px;background:#151a40;border-radius:8px">
+        <div id="batchConcurrency" style="font-size:20px;font-weight:700;color:#c4b5fd">-</div>
+        <div style="font-size:11px;color:#6b7280">并发</div>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#8890b5;margin-bottom:4px">
+        <span id="batchProgressText">等待连接...</span>
+        <span id="batchPercent">0%</span>
+      </div>
+      <div style="background:#0a0e27;border-radius:4px;height:8px;overflow:hidden">
+        <div id="batchProgressBar" style="height:100%;border-radius:4px;background:linear-gradient(90deg,#2563eb,#7c3aed);width:0%;transition:width .3s ease"></div>
+      </div>
+    </div>
+    <div id="batchLog" style="max-height:200px;overflow-y:auto;font-family:'Menlo','Monaco',monospace;font-size:11px;line-height:1.8;color:#6b7280;background:#0a0e27;border-radius:6px;padding:8px 10px"></div>
+  </div>`;
+
+  // 计时器
+  const timerInterval = setInterval(() => {
+    const el = document.getElementById('batchTimer');
+    if (el) el.textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's';
+  }, 100);
+
+  try {
+    const es = new EventSource(API + '/api/intelligences/batch-generate-content/stream?concurrency=3');
+
+    es.addEventListener('start', e => {
+      const d = JSON.parse(e.data);
+      const totalEl = document.getElementById('batchTotal');
+      const concEl = document.getElementById('batchConcurrency');
+      const textEl = document.getElementById('batchProgressText');
+      if (totalEl) totalEl.textContent = d.total;
+      if (concEl) concEl.textContent = d.concurrency;
+      if (textEl) textEl.textContent = d.total === 0 ? '无需生成' : '正在生成...';
+      if (d.total === 0) {
+        es.close();
+        clearInterval(timerInterval);
+        btn.disabled = false;
+        btn.textContent = '⚡ 批量生成正文';
+      }
+    });
+
+    es.addEventListener('progress', e => {
+      const d = JSON.parse(e.data);
+      const pct = Math.round(d.current / d.total * 100);
+      const barEl = document.getElementById('batchProgressBar');
+      const pctEl = document.getElementById('batchPercent');
+      const textEl = document.getElementById('batchProgressText');
+      const succEl = document.getElementById('batchSuccess');
+      const failEl = document.getElementById('batchFailed');
+      const logEl = document.getElementById('batchLog');
+      if (barEl) barEl.style.width = pct + '%';
+      if (pctEl) pctEl.textContent = pct + '%';
+      if (textEl) textEl.textContent = d.current + ' / ' + d.total;
+      if (succEl) succEl.textContent = d.success;
+      if (failEl) failEl.textContent = d.failed;
+      if (logEl) {
+        const icon = d.ok ? '✅' : '❌';
+        const title = d.title ? d.title.substring(0, 40) : 'ID:' + d.intelId;
+        const extra = d.ok ? (d.ms + 'ms') : (d.error || 'failed');
+        logEl.innerHTML += `<div style="color:${d.ok ? '#4ade80' : '#f87171'}">${icon} [${d.current}/${d.total}] ${esc(title)} <span style="color:#6b7280">${esc(extra)}</span></div>`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    });
+
+    es.addEventListener('done', e => {
+      es.close();
+      clearInterval(timerInterval);
+      const d = JSON.parse(e.data);
+      const ms = Math.round(performance.now() - t0);
+      const textEl = document.getElementById('batchProgressText');
+      const timerEl = document.getElementById('batchTimer');
+      if (textEl) textEl.textContent = '全部完成';
+      if (timerEl) { timerEl.style.color = '#4ade80'; timerEl.textContent = (ms / 1000).toFixed(1) + 's ✓'; }
+      // 在进度条下方追加完成摘要
+      const barParent = document.getElementById('batchProgressBar')?.parentElement?.parentElement;
+      if (barParent) {
+        const summary = document.createElement('div');
+        summary.style.cssText = 'margin-top:10px;padding:10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:13px;color:#4ade80';
+        summary.textContent = '✅ 完成 — 共 ' + d.total + ' 条，成功 ' + d.success + '，失败 ' + d.failed + '（' + (ms/1000).toFixed(1) + 's）';
+        barParent.appendChild(summary);
+      }
+      btn.disabled = false;
+      btn.textContent = '⚡ 批量生成正文';
+      loadIntelligences();
+      loadStats();
+    });
+
+    es.addEventListener('error', e => {
+      es.close();
+      clearInterval(timerInterval);
+      const textEl = document.getElementById('batchProgressText');
+      if (textEl) { textEl.textContent = '连接异常'; textEl.style.color = '#f87171'; }
+      btn.disabled = false;
+      btn.textContent = '⚡ 批量生成正文';
+    });
+
+    es.onerror = () => {
+      // EventSource 自动重连前先关闭
+      es.close();
+      clearInterval(timerInterval);
+      btn.disabled = false;
+      btn.textContent = '⚡ 批量生成正文';
+    };
+  } catch (e) {
+    clearInterval(timerInterval);
+    statusEl.innerHTML = `<div style="padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;font-size:13px;color:#f87171">❌ 连接失败: ${esc(e.message)}</div>`;
+    btn.disabled = false;
+    btn.textContent = '⚡ 批量生成正文';
+  }
 }
 
 async function loadIntelligences() {

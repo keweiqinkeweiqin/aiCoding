@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.*;
 
@@ -23,6 +24,27 @@ import java.util.*;
 public class IntelligenceController {
 
     private static final Logger log = LoggerFactory.getLogger(IntelligenceController.class);
+
+    // 英文标签 → 中文映射（双向匹配用）
+    private static final Map<String, String> EN_TO_CN = Map.ofEntries(
+            Map.entry("chip", "芯片"), Map.entry("semiconductor", "半导体"),
+            Map.entry("robot", "机器人"), Map.entry("cloud", "云计算"),
+            Map.entry("autonomous driving", "自动驾驶"),
+            Map.entry("ev", "新能源车"), Map.entry("battery", "电池"),
+            Map.entry("quantum", "量子计算"), Map.entry("biotech", "生物科技"),
+            Map.entry("fintech", "金融科技"), Map.entry("cybersecurity", "网络安全"),
+            Map.entry("metaverse", "元宇宙"), Map.entry("gpu", "GPU"),
+            Map.entry("llm", "大模型"), Map.entry("large model", "大模型"),
+            Map.entry("data center", "数据中心"),
+            Map.entry("trade", "贸易"), Map.entry("tariff", "关税"),
+            Map.entry("regulation", "监管"), Map.entry("ipo", "IPO"),
+            Map.entry("earnings", "财报"), Map.entry("merger", "并购")
+    );
+    // 反向映射：中文 → 英文
+    private static final Map<String, String> CN_TO_EN = new HashMap<>();
+    static {
+        EN_TO_CN.forEach((en, cn) -> CN_TO_EN.putIfAbsent(cn.toLowerCase(), en));
+    }
 
     private final IntelligenceService intelligenceService;
     private final EventClusterService eventClusterService;
@@ -69,9 +91,14 @@ public class IntelligenceController {
 
     /** C端首页：画像相关性排序后取前3条 */
     private ResponseEntity<Map<String, Object>> listHome(int hours, Long userId) {
+        // 优先按 latestArticleTime 过滤，fallback 到 createdAt
+        java.time.LocalDateTime since = java.time.LocalDateTime.now().minusHours(hours);
         var all = intelligenceRepository
-                .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
-                        java.time.LocalDateTime.now().minusHours(hours));
+                .findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(since);
+        if (all.isEmpty()) {
+            all = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since);
+        }
 
         if (all.isEmpty()) {
             return ResponseEntity.ok(Map.of(
@@ -369,6 +396,32 @@ public class IntelligenceController {
         ));
     }
 
+    /** 批量并发生成缺失 content 的情报正文，避免 C 端首次访问时长时间等待 */
+    @PostMapping("/batch-generate-content")
+    public ResponseEntity<Map<String, Object>> batchGenerateContent(
+            @RequestParam(defaultValue = "3") int concurrency) {
+        var result = intelligenceService.batchGenerateContent(Math.min(concurrency, 10));
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of(
+                        "total", result.total(),
+                        "success", result.success(),
+                        "failed", result.failed()
+                )
+        ));
+    }
+
+    /** 批量生成正文（SSE 流式进度监控） */
+    @GetMapping("/batch-generate-content/stream")
+    public SseEmitter batchGenerateContentStream(
+            @RequestParam(defaultValue = "3") int concurrency) {
+        SseEmitter emitter = new SseEmitter(600_000L); // 10 min timeout
+        emitter.onTimeout(emitter::complete);
+        new Thread(() -> intelligenceService.batchGenerateContentStream(
+                Math.min(concurrency, 10), emitter)).start();
+        return emitter;
+    }
+
     /**
      * Calculate relevance score for personalized sorting.
      * Higher score = more relevant to user's focus areas and holdings.
@@ -376,11 +429,23 @@ public class IntelligenceController {
     private int calcRelevance(Intelligence intel, Set<String> focusAreas, Set<String> holdings) {
         int score = 0;
 
+        // 构建扩展的关注领域集合（中英文双向），提高匹配率
+        Set<String> expandedAreas = new HashSet<>(focusAreas);
+        for (String area : focusAreas) {
+            String lower = area.trim().toLowerCase();
+            // 中文 → 英文
+            String en = CN_TO_EN.get(lower);
+            if (en != null) expandedAreas.add(en);
+            // 英文 → 中文
+            String cn = EN_TO_CN.get(lower);
+            if (cn != null) expandedAreas.add(cn.toLowerCase());
+        }
+
         // Match tags against focus areas (+10 per match)
         String tags = intel.getTags();
-        if (tags != null && !focusAreas.isEmpty()) {
+        if (tags != null && !expandedAreas.isEmpty()) {
             for (String tag : tags.toLowerCase().split(",")) {
-                if (focusAreas.contains(tag.trim())) score += 10;
+                if (expandedAreas.contains(tag.trim())) score += 10;
             }
         }
 

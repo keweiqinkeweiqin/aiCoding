@@ -14,7 +14,13 @@ public interface IntelligenceRepository extends JpaRepository<Intelligence, Long
     Page<Intelligence> findByCreatedAtAfterOrderByLatestArticleTimeDesc(
             LocalDateTime since, Pageable pageable);
 
+    Page<Intelligence> findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(
+            LocalDateTime since, Pageable pageable);
+
     List<Intelligence> findByCreatedAtAfterOrderByLatestArticleTimeDesc(
+            LocalDateTime since);
+
+    List<Intelligence> findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(
             LocalDateTime since);
 
     @Query("SELECT i FROM Intelligence i WHERE LOWER(i.title) LIKE LOWER(CONCAT('%',:keyword,'%')) " +

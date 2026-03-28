@@ -57,17 +57,25 @@ public class InsightController {
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> insight(
-            @RequestParam(defaultValue = "7") int days) {
+            @RequestParam(defaultValue = "7") int days,
+            @RequestParam(defaultValue = "20") int eventLimit) {
 
         LocalDateTime since = LocalDateTime.now().minusDays(days);
         List<Intelligence> intels = intelligenceRepository
-                .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since);
+                .findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(since);
+
+        // fallback: 如果按 latestArticleTime 查不到数据，用 createdAt 兜底
+        if (intels.isEmpty()) {
+            intels = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since);
+        }
+
         List<MarketData> markets = marketDataRepository.findAll();
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("overview", buildOverview(intels, markets, days));
         data.put("sectors", buildSectors(intels, 5));
-        data.put("events", buildEvents(intels, 10));
+        data.put("events", buildEvents(intels, eventLimit));
         data.put("reports", buildReports(since, 10));
 
         return ResponseEntity.ok(Map.of("code", 200, "data", data));
@@ -104,16 +112,16 @@ public class InsightController {
         o.put("stockUp", up);
         o.put("stockDown", down);
 
-        // Trend data: sentiment index per day
+        // Trend data: sentiment index per day (based on latestArticleTime)
         List<Map<String, Object>> trend = new ArrayList<>();
         for (int d = days - 1; d >= 0; d--) {
             LocalDateTime dayStart = LocalDateTime.now().minusDays(d).withHour(0).withMinute(0);
             LocalDateTime dayEnd = dayStart.plusDays(1);
-            long dayTotal = intels.stream().filter(i -> i.getCreatedAt() != null
-                    && !i.getCreatedAt().isBefore(dayStart) && i.getCreatedAt().isBefore(dayEnd)).count();
+            long dayTotal = intels.stream().filter(i -> i.getLatestArticleTime() != null
+                    && !i.getLatestArticleTime().isBefore(dayStart) && i.getLatestArticleTime().isBefore(dayEnd)).count();
             long dayPos = intels.stream().filter(i -> "positive".equals(i.getSentiment())
-                    && i.getCreatedAt() != null && !i.getCreatedAt().isBefore(dayStart)
-                    && i.getCreatedAt().isBefore(dayEnd)).count();
+                    && i.getLatestArticleTime() != null && !i.getLatestArticleTime().isBefore(dayStart)
+                    && i.getLatestArticleTime().isBefore(dayEnd)).count();
             int dayIndex = dayTotal > 0 ? (int) Math.round((double) dayPos / dayTotal * 100) : 50;
             trend.add(Map.of("date", dayStart.toLocalDate().toString(), "value", dayIndex));
         }

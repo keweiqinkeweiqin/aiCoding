@@ -26,19 +26,22 @@ public class NewsController {
     private final MarketDataRepository marketDataRepository;
     private final SmartQueryService smartQueryService;
     private final VectorSearchService vectorSearchService;
+    private final com.example.demo.service.CredibilityService credibilityService;
 
     public NewsController(NewsCollectorService newsCollectorService,
                           MarketDataCollector marketDataCollector,
                           NewsArticleRepository newsArticleRepository,
                           MarketDataRepository marketDataRepository,
                           SmartQueryService smartQueryService,
-                          VectorSearchService vectorSearchService) {
+                          VectorSearchService vectorSearchService,
+                          com.example.demo.service.CredibilityService credibilityService) {
         this.newsCollectorService = newsCollectorService;
         this.marketDataCollector = marketDataCollector;
         this.newsArticleRepository = newsArticleRepository;
         this.marketDataRepository = marketDataRepository;
         this.smartQueryService = smartQueryService;
         this.vectorSearchService = vectorSearchService;
+        this.credibilityService = credibilityService;
     }
 
     /** 手动触发新闻采集 */
@@ -55,6 +58,21 @@ public class NewsController {
                         "deduplicated", s.deduplicated(),
                         "stored", s.stored()
                 )).toList()
+        ));
+    }
+
+    /** 批量并发重新计算所有新闻的置信度 */
+    @PostMapping("/news/batch-credibility")
+    public ResponseEntity<Map<String, Object>> batchCredibility(
+            @RequestParam(defaultValue = "3") int concurrency) {
+        var result = credibilityService.batchReassess(Math.min(concurrency, 10));
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of(
+                        "total", result.total(),
+                        "success", result.success(),
+                        "failed", result.failed()
+                )
         ));
     }
 

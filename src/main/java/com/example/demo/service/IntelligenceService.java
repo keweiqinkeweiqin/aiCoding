@@ -12,6 +12,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -40,8 +41,141 @@ public class IntelligenceService {
     /** 分页查询情报列表 */
     public Page<Intelligence> listIntelligences(int hours, int page, int size) {
         LocalDateTime since = LocalDateTime.now().minusHours(hours);
-        return intelligenceRepository.findByCreatedAtAfterOrderByLatestArticleTimeDesc(
-                since, PageRequest.of(page, size));
+        // 优先按 latestArticleTime 过滤，fallback 到 createdAt
+        Page<Intelligence> result = intelligenceRepository
+                .findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(since, PageRequest.of(page, size));
+        if (result.isEmpty()) {
+            result = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since, PageRequest.of(page, size));
+        }
+        return result;
+    }
+
+    /**
+     * 批量并发生成缺失 content 的情报正文。
+     * 用于控制面板手动触发，避免 C 端用户首次访问时长时间等待 LLM。
+     * @param concurrency 并发线程数
+     * @return 生成结果统计
+     */
+    public BatchGenerateResult batchGenerateContent(int concurrency) {
+        List<Intelligence> all = intelligenceRepository.findAll();
+        List<Intelligence> needContent = all.stream()
+                .filter(i -> i.getContent() == null || i.getContent().isBlank())
+                .toList();
+
+        if (needContent.isEmpty()) {
+            return new BatchGenerateResult(0, 0, 0);
+        }
+
+        log.info("批量生成情报正文: 共 {} 条待生成, 并发={}", needContent.size(), concurrency);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+        java.util.concurrent.atomic.AtomicInteger success = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger();
+
+        List<java.util.concurrent.CompletableFuture<Void>> futures = needContent.stream()
+                .map(intel -> java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        getDetail(intel.getId());
+                        success.incrementAndGet();
+                        log.debug("批量生成完成: intel={}", intel.getId());
+                    } catch (Exception e) {
+                        failed.incrementAndGet();
+                        log.warn("批量生成失败: intel={}, error={}", intel.getId(), e.getMessage());
+                    }
+                }, pool))
+                .toList();
+
+        // 等待全部完成
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+        pool.shutdown();
+
+        log.info("批量生成情报正文完成: total={}, success={}, failed={}", needContent.size(), success.get(), failed.get());
+        return new BatchGenerateResult(needContent.size(), success.get(), failed.get());
+    }
+
+    public record BatchGenerateResult(int total, int success, int failed) {}
+
+    /**
+     * 批量生成正文（SSE 流式进度推送）。
+     * 事件: start → progress(每条) → done
+     */
+    public void batchGenerateContentStream(int concurrency, SseEmitter emitter) {
+        try {
+            List<Intelligence> all = intelligenceRepository.findAll();
+            List<Intelligence> needContent = all.stream()
+                    .filter(i -> i.getContent() == null || i.getContent().isBlank())
+                    .toList();
+
+            // start 事件：告知总数
+            emitter.send(SseEmitter.event().name("start")
+                    .data("{\"total\":" + needContent.size() + ",\"concurrency\":" + concurrency + "}"));
+
+            if (needContent.isEmpty()) {
+                emitter.send(SseEmitter.event().name("done")
+                        .data("{\"total\":0,\"success\":0,\"failed\":0}"));
+                emitter.complete();
+                return;
+            }
+
+            var pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+            var success = new java.util.concurrent.atomic.AtomicInteger();
+            var failed = new java.util.concurrent.atomic.AtomicInteger();
+            var completed = new java.util.concurrent.atomic.AtomicInteger();
+
+            var futures = needContent.stream()
+                    .map(intel -> java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        long t0 = System.currentTimeMillis();
+                        boolean ok = false;
+                        String errMsg = null;
+                        try {
+                            getDetail(intel.getId());
+                            success.incrementAndGet();
+                            ok = true;
+                        } catch (Exception e) {
+                            failed.incrementAndGet();
+                            errMsg = e.getMessage();
+                        }
+                        int done = completed.incrementAndGet();
+                        long elapsed = System.currentTimeMillis() - t0;
+                        try {
+                            String json = "{\"current\":" + done
+                                    + ",\"total\":" + needContent.size()
+                                    + ",\"success\":" + success.get()
+                                    + ",\"failed\":" + failed.get()
+                                    + ",\"intelId\":" + intel.getId()
+                                    + ",\"title\":" + escapeJson(intel.getTitle())
+                                    + ",\"ok\":" + ok
+                                    + ",\"ms\":" + elapsed
+                                    + (errMsg != null ? ",\"error\":" + escapeJson(errMsg) : "")
+                                    + "}";
+                            synchronized (emitter) {
+                                emitter.send(SseEmitter.event().name("progress").data(json));
+                            }
+                        } catch (Exception ignored) {}
+                    }, pool))
+                    .toList();
+
+            java.util.concurrent.CompletableFuture.allOf(
+                    futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            pool.shutdown();
+
+            emitter.send(SseEmitter.event().name("done")
+                    .data("{\"total\":" + needContent.size()
+                            + ",\"success\":" + success.get()
+                            + ",\"failed\":" + failed.get() + "}"));
+            emitter.complete();
+        } catch (Exception e) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
+                emitter.complete();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "null";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r") + "\"";
     }
 
     /** 清空所有情报的 content 缓存 */

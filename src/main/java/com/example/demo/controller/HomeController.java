@@ -61,12 +61,23 @@ public class HomeController {
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> home(
-            @RequestParam(defaultValue = "0") Long userId) {
+            @RequestParam(defaultValue = "0") Long userId,
+            @RequestParam(defaultValue = "24") int hours) {
+
+        // 统一时间窗口：greeting 和 marketOverview 使用同一份情报数据
+        // 优先按 latestArticleTime 过滤（合并新文章后会更新），fallback 到 createdAt
+        LocalDateTime since = LocalDateTime.now().minusHours(hours);
+        List<Intelligence> recent = intelligenceRepository
+                .findByLatestArticleTimeAfterOrderByLatestArticleTimeDesc(since);
+        if (recent.isEmpty()) {
+            recent = intelligenceRepository
+                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(since);
+        }
 
         Map<String, Object> data = new LinkedHashMap<>();
 
         // 1. Greeting
-        data.put("greeting", buildGreeting(userId));
+        data.put("greeting", buildGreeting(userId, recent));
 
         // 2. Quick actions
         data.put("quickActions", List.of(
@@ -77,12 +88,12 @@ public class HomeController {
         ));
 
         // 3. Market overview
-        data.put("marketOverview", buildMarketOverview());
+        data.put("marketOverview", buildMarketOverview(recent));
 
         return ResponseEntity.ok(Map.of("code", 200, "data", data));
     }
 
-    private Map<String, Object> buildGreeting(Long userId) {
+    private Map<String, Object> buildGreeting(Long userId, List<Intelligence> recent) {
         Map<String, Object> greeting = new LinkedHashMap<>();
         String nickname = "访客";
         String profileTag = "";
@@ -112,13 +123,9 @@ public class HomeController {
         greeting.put("nickname", nickname);
         greeting.put("profileTag", profileTag);
 
-        // Market status one-liner from recent intelligences
-        List<Intelligence> recent = intelligenceRepository
-                .findByCreatedAtAfterOrderByLatestArticleTimeDesc(LocalDateTime.now().minusHours(24));
+        // Market status one-liner — 使用传入的 recent 列表（与 marketOverview 同源）
         long pos = recent.stream().filter(i -> "positive".equals(i.getSentiment())).count();
-        long neg = recent.stream().filter(i -> "negative".equals(i.getSentiment())).count();
         long total = recent.size();
-        // 与 sentimentLabel 保持一致的措辞体系：偏多/中性/偏空
         int sentimentIndex = total > 0 ? (int) Math.round((double) pos / total * 100) : 50;
         String status;
         if (total == 0) {
@@ -135,12 +142,10 @@ public class HomeController {
         return greeting;
     }
 
-    private Map<String, Object> buildMarketOverview() {
+    private Map<String, Object> buildMarketOverview(List<Intelligence> recent) {
         Map<String, Object> overview = new LinkedHashMap<>();
 
-        // Sentiment index from recent 24h intelligences
-        List<Intelligence> recent = intelligenceRepository
-                .findByCreatedAtAfterOrderByLatestArticleTimeDesc(LocalDateTime.now().minusHours(24));
+        // Sentiment index — 使用传入的 recent 列表（与 greeting 同源）
         long total = recent.size();
         long positive = recent.stream().filter(i -> "positive".equals(i.getSentiment())).count();
         long negative = recent.stream().filter(i -> "negative".equals(i.getSentiment())).count();

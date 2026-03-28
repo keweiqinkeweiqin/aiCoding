@@ -59,6 +59,8 @@ public class CredibilityService {
                 + llmScore * W_LLM
                 + freshnessScore * W_FRESHNESS
                 + crossScore * W_CROSS;
+        // 确保综合分数不超过 1.0
+        overall = Math.min(1.0, overall);
 
         String level;
         if (overall >= 0.8) level = "authoritative";
@@ -136,4 +138,44 @@ public class CredibilityService {
             double freshnessScore,  // 时效性
             double crossScore       // 交叉验证
     ) {}
+
+    /**
+     * 批量并发重新计算所有新闻的置信度，并同步更新关联情报的置信度。
+     */
+    public BatchCredibilityResult batchReassess(int concurrency) {
+        List<NewsArticle> all = newsArticleRepository.findAll();
+        if (all.isEmpty()) return new BatchCredibilityResult(0, 0, 0);
+
+        log.info("批量重算置信度: 共 {} 条新闻, 并发={}", all.size(), concurrency);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+        var success = new java.util.concurrent.atomic.AtomicInteger();
+        var failed = new java.util.concurrent.atomic.AtomicInteger();
+
+        var futures = all.stream()
+                .map(article -> java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        var r = assess(article);
+                        article.setCredibilityScore(r.overallScore());
+                        article.setCredibilityLevel(r.level());
+                        article.setSourceCredibility(r.sourceScore());
+                        article.setLlmCredibility(r.llmScore());
+                        article.setFreshnessCredibility(r.freshnessScore());
+                        article.setCrossCredibility(r.crossScore());
+                        newsArticleRepository.save(article);
+                        success.incrementAndGet();
+                    } catch (Exception e) {
+                        failed.incrementAndGet();
+                        log.warn("置信度重算失败 article={}: {}", article.getId(), e.getMessage());
+                    }
+                }, pool))
+                .toList();
+
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+        pool.shutdown();
+
+        log.info("批量重算置信度完成: total={}, success={}, failed={}", all.size(), success.get(), failed.get());
+        return new BatchCredibilityResult(all.size(), success.get(), failed.get());
+    }
+
+    public record BatchCredibilityResult(int total, int success, int failed) {}
 }
