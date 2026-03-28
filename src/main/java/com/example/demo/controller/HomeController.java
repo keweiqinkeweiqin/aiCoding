@@ -118,15 +118,17 @@ public class HomeController {
         long pos = recent.stream().filter(i -> "positive".equals(i.getSentiment())).count();
         long neg = recent.stream().filter(i -> "negative".equals(i.getSentiment())).count();
         long total = recent.size();
+        // 与 sentimentLabel 保持一致的措辞体系：偏多/中性/偏空
+        int sentimentIndex = total > 0 ? (int) Math.round((double) pos / total * 100) : 50;
         String status;
         if (total == 0) {
-            status = "暂无最新数据";
-        } else if (pos > neg * 2) {
-            status = "市场情绪偏多，已追踪" + total + "条情报";
-        } else if (neg > pos * 2) {
-            status = "市场情绪偏空，注意风险";
+            status = "暂无最新情报，请先采集数据";
+        } else if (sentimentIndex >= 70) {
+            status = "市场情绪偏多，已为你追踪" + total + "条情报";
+        } else if (sentimentIndex < 40) {
+            status = "市场情绪偏空，已为你监控" + total + "条风险情报";
         } else {
-            status = "市场情绪中性，已追踪" + total + "条情报";
+            status = "市场情绪中性，已为你追踪" + total + "条情报";
         }
         greeting.put("marketStatus", status);
 

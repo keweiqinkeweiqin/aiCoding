@@ -43,7 +43,7 @@ Response:
     "greeting": {
       "nickname": "Tom",
       "profileTag": "成长型 | AI",
-      "marketStatus": "市场情绪偏多，已追踪56条情报"
+      "marketStatus": "市场情绪偏多，已为你追踪56条情报"
     },
     "quickActions": [
       { "id": "collect", "name": "采集新闻", "icon": "refresh" },
@@ -71,7 +71,7 @@ Response:
 说明：
 - 未登录时 nickname 为"访客"，profileTag 为空
 - sentimentLabel 取值：偏多 / 中性 / 偏空
-- marketStatus 取值：市场情绪偏多/偏空/中性 + 情报数量
+- marketStatus 取值：与 sentimentLabel 一致，市场情绪偏多/偏空/中性 + 情报数量；无数据时返回"暂无最新情报，请先采集数据"
 - hotTags 中的英文标签会自动翻译为中文（如 chip→芯片、semiconductor→半导体、robot→机器人、cloud→云计算、LLM→大模型等），未在映射表中的标签保持原样
 - 首页不再内嵌推荐情报列表，情报数据请通过 `GET /api/intelligences` 单独获取
 
@@ -531,6 +531,15 @@ Request:
 ### POST /api/search — 搜索情报
 
 语义搜索 + 关键词模糊匹配，合并去重，支持排序和分页。
+
+URL: `POST http://{host}:8080/api/search`
+
+curl 示例:
+```bash
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"keyword":"AI芯片","page":0,"size":20,"sortBy":"relevance"}'
+```
 
 Request:
 ```json
