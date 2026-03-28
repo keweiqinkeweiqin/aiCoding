@@ -15,7 +15,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,21 +34,25 @@ public class EventClusterService {
     private final DeduplicationService deduplicationService;
     private final EmbeddingClient embeddingClient;
     private final ChatClient chatClient;
+    private final IntelligenceService intelligenceService;
 
     private final ConcurrentHashMap<Long, float[]> intelEmbeddingCache = new ConcurrentHashMap<>();
+    private final ExecutorService contentGenPool = Executors.newFixedThreadPool(3);
 
     public EventClusterService(IntelligenceRepository intelligenceRepository,
                                IntelligenceArticleRepository intelligenceArticleRepository,
                                NewsArticleRepository newsArticleRepository,
                                DeduplicationService deduplicationService,
                                EmbeddingClient embeddingClient,
-                               ChatClient.Builder chatClientBuilder) {
+                               ChatClient.Builder chatClientBuilder,
+                               IntelligenceService intelligenceService) {
         this.intelligenceRepository = intelligenceRepository;
         this.intelligenceArticleRepository = intelligenceArticleRepository;
         this.newsArticleRepository = newsArticleRepository;
         this.deduplicationService = deduplicationService;
         this.embeddingClient = embeddingClient;
         this.chatClient = chatClientBuilder.build();
+        this.intelligenceService = intelligenceService;
     }
 
     /**
@@ -117,6 +124,28 @@ public class EventClusterService {
         }
 
         log.info("事件聚类完成: created={}, merged={}, unclustered={}", created, merged, unclustered.size());
+
+        // 异步并发预生成情报正文（content 为空的情报）
+        if (created + merged > 0) {
+            List<Long> needContent = recentIntels.stream()
+                    .filter(i -> i.getContent() == null || i.getContent().isBlank())
+                    .map(Intelligence::getId)
+                    .toList();
+            if (!needContent.isEmpty()) {
+                log.info("异步预生成 {} 条情报正文", needContent.size());
+                for (Long intelId : needContent) {
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            intelligenceService.getDetail(intelId);
+                            log.debug("预生成情报正文完成: {}", intelId);
+                        } catch (Exception e) {
+                            log.warn("预生成情报正文失败 {}: {}", intelId, e.getMessage());
+                        }
+                    }, contentGenPool);
+                }
+            }
+        }
+
         return new ClusterResult(created, merged);
     }
 

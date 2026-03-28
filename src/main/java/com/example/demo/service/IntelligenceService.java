@@ -110,27 +110,20 @@ public class IntelligenceService {
         // Try LLM synthesis for multi-source intelligences
         if (articles.size() >= 2) {
             try {
-                String articlesText = articles.stream().map(a -> {
+                // 限制最多取5条新闻，每条摘要最多200字，控制总 prompt 长度
+                String articlesText = articles.stream().limit(5).map(a -> {
                     String body = a.getSummary() != null ? a.getSummary() : "";
                     if (body.isBlank() && a.getContent() != null) {
-                        body = a.getContent().length() > 500 ? a.getContent().substring(0, 500) : a.getContent();
+                        body = a.getContent().length() > 200 ? a.getContent().substring(0, 200) + "..." : a.getContent();
+                    } else if (body.length() > 200) {
+                        body = body.substring(0, 200) + "...";
                     }
                     return "【" + a.getSourceName() + "】" + a.getTitle() + "\n" + body;
                 }).collect(Collectors.joining("\n\n"));
 
-                String prompt = "你是「华尔街之眼」的资深投研分析师，擅长将多条新闻综合提炼为高质量的投研情报。\n\n"
-                        + "请基于以下 " + articles.size() + " 条来自不同来源的新闻报道，撰写一篇结构清晰的中文投研分析文章。\n\n"
-                        + "【写作要求】\n"
-                        + "1. 第一段「事件概述」：用2-3句话概括核心事件，点明时间、主体、关键动作\n"
-                        + "2. 第二段「多方信息」：综合各来源的差异化信息，标注信息来源（如'据财联社报道'），区分事实与观点\n"
-                        + "3. 第三段「市场影响」：分析对相关行业/个股的潜在影响，引用具体数据（如有）\n"
-                        + "4. 第四段「关注要点」：列出2-3个后续值得关注的要点，用「·」开头\n\n"
-                        + "【格式要求】\n"
-                        + "- 每段之间用空行分隔\n"
-                        + "- 总字数控制在400-600字\n"
-                        + "- 语言专业但易读，适合投资者快速阅读\n"
-                        + "- 不要使用 Markdown 标记（如 # ** 等），直接输出纯文本\n"
-                        + "- 段落开头不需要标注「事件概述」等标题，直接写内容\n\n"
+                String prompt = "你是投研分析师。基于以下 " + Math.min(articles.size(), 5) + " 条新闻，撰写中文投研分析。\n\n"
+                        + "要求：1)事件概述2-3句 2)综合各来源差异信息，标注来源 3)市场影响分析 4)2-3个关注要点用·开头\n"
+                        + "格式：段落间空行，400-600字，纯文本无Markdown\n\n"
                         + "【新闻素材】\n" + articlesText;
 
                 String content = chatClient.prompt().user(prompt).call().content();
@@ -153,17 +146,10 @@ public class IntelligenceService {
             try {
                 NewsArticle a = articles.get(0);
                 String body = a.getContent() != null ? a.getContent() : (a.getSummary() != null ? a.getSummary() : "");
-                if (body.length() > 800) body = body.substring(0, 800);
+                if (body.length() > 400) body = body.substring(0, 400) + "...";
                 if (!body.isBlank()) {
-                    String prompt = "你是「华尔街之眼」的投研分析师。请将以下新闻改写为一篇简洁的投研快讯。\n\n"
-                            + "【要求】\n"
-                            + "- 第一段概述核心事件（2-3句）\n"
-                            + "- 第二段分析市场影响和关注要点\n"
-                            + "- 总字数200-300字，语言专业易读\n"
-                            + "- 不要使用 Markdown 标记，直接输出纯文本\n"
-                            + "- 段落间用空行分隔\n\n"
-                            + "【来源：" + a.getSourceName() + "】\n"
-                            + a.getTitle() + "\n" + body;
+                    String prompt = "将以下新闻改写为投研快讯。要求：第一段概述核心事件2-3句，第二段分析市场影响。200-300字，纯文本无Markdown。\n\n"
+                            + "【" + a.getSourceName() + "】" + a.getTitle() + "\n" + body;
 
                     String content = chatClient.prompt().user(prompt).call().content();
                     if (content != null && !content.isBlank()) {

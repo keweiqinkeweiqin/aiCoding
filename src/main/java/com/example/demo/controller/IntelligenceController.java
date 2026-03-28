@@ -164,7 +164,7 @@ public class IntelligenceController {
         return item;
     }
 
-    /** 情报详情（含个性化分析） */
+    /** 情报详情（纯DB，不调LLM，秒回） */
     @GetMapping("/{id}")
     public ResponseEntity<Map<String, Object>> detail(
             @PathVariable Long id,
@@ -202,88 +202,98 @@ public class IntelligenceController {
             }).toList();
             data.put("sources", sources);
 
-            // 相关情报（内嵌返回，不需要单独请求）
-            var allRecent = intelligenceRepository
-                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
-                            java.time.LocalDateTime.now().minusHours(72));
-            var related = allRecent.stream()
-                    .filter(i -> !i.getId().equals(id))
-                    .limit(5)
-                    .map(i -> {
-                        Map<String, Object> ri = new LinkedHashMap<>();
-                        ri.put("id", i.getId());
-                        ri.put("title", i.getTitle());
-                        ri.put("summary", i.getSummary());
-                        ri.put("primarySource", i.getPrimarySource());
-                        ri.put("sourceCount", i.getSourceCount());
-                        ri.put("credibilityScore", i.getCredibilityScore());
-                        ri.put("latestArticleTime", i.getLatestArticleTime());
-                        return ri;
-                    }).toList();
-            data.put("relatedIntelligences", related);
-
-            // 个性化影响分析（带超时保护的LLM调用）
-            if (userId > 0) {
-                Map<String, Object> personalized = new LinkedHashMap<>();
-
-                UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
-                if (profile != null) {
-                    Map<String, Object> profileCard = new LinkedHashMap<>();
-                    profileCard.put("investorType", profile.getInvestorType());
-                    profileCard.put("investmentCycle", profile.getInvestmentCycle());
-                    profileCard.put("focusAreas", profile.getFocusAreas() != null
-                            ? List.of(profile.getFocusAreas().split(",")) : List.of());
-                    // 从 user_holdings 表读取完整持仓信息
-                    var holdings = userHoldingRepository.findByUserId(userId);
-                    profileCard.put("holdings", holdings.stream().map(h -> {
-                        Map<String, Object> hm = new java.util.LinkedHashMap<>();
-                        hm.put("stockCode", h.getStockCode());
-                        hm.put("stockName", h.getStockName());
-                        hm.put("sector", h.getSector());
-                        hm.put("percentage", h.getPercentage());
-                        hm.put("costPrice", h.getCostPrice());
-                        return hm;
-                    }).toList());
-                    personalized.put("userProfile", profileCard);
-                } else {
-                    personalized.put("userProfile", null);
-                }
-
-                // LLM分析：带15秒超时保护
-                final Long fUserId = userId;
-                final Long fId = id;
-                try {
-                    var future = java.util.concurrent.CompletableFuture.supplyAsync(() ->
-                            analysisService.generateAnalysis(fUserId, fId));
-                    Map<String, Object> analysis = future.get(15, java.util.concurrent.TimeUnit.SECONDS);
-                    personalized.put("analysis", analysis.get("analysis"));
-                    personalized.put("impacts", analysis.get("impacts"));
-                    personalized.put("suggestion", analysis.get("suggestion"));
-                    personalized.put("risks", analysis.get("risks"));
-                    personalized.put("userContext", analysis.get("userContext"));
-                } catch (java.util.concurrent.TimeoutException e) {
-                    log.warn("LLM分析超时(15s) for intel {}", id);
-                    personalized.put("analysis", "分析超时，请稍后重试");
-                    personalized.put("impacts", List.of());
-                    personalized.put("suggestion", null);
-                    personalized.put("risks", List.of());
-                } catch (Exception e) {
-                    log.warn("Analysis failed for intel {}: {}", id, e.getMessage());
-                    personalized.put("analysis", null);
-                    personalized.put("impacts", List.of());
-                    personalized.put("suggestion", null);
-                    personalized.put("risks", List.of());
-                }
-
-                data.put("personalizedAnalysis", personalized);
-            } else {
-                data.put("personalizedAnalysis", null);
+            // 相关情报（纯DB查询）
+            try {
+                var allRecent = intelligenceRepository
+                        .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
+                                java.time.LocalDateTime.now().minusHours(72));
+                var related = allRecent.stream()
+                        .filter(i -> !i.getId().equals(id))
+                        .limit(5)
+                        .map(i -> {
+                            Map<String, Object> ri = new LinkedHashMap<>();
+                            ri.put("id", i.getId());
+                            ri.put("title", i.getTitle());
+                            ri.put("summary", i.getSummary());
+                            ri.put("primarySource", i.getPrimarySource());
+                            ri.put("sourceCount", i.getSourceCount());
+                            ri.put("credibilityScore", i.getCredibilityScore());
+                            ri.put("latestArticleTime", i.getLatestArticleTime());
+                            return ri;
+                        }).toList();
+                data.put("relatedIntelligences", related);
+            } catch (Exception e) {
+                data.put("relatedIntelligences", List.of());
             }
+
+            // personalizedAnalysis 不再内嵌，前端单独请求 /{id}/analysis
+            data.put("personalizedAnalysis", null);
 
             return ResponseEntity.ok(Map.of("code", 200, "data", data));
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(404).body(Map.of(
                     "code", 404, "message", e.getMessage()));
+        }
+    }
+
+    /** 个性化分析（独立接口，调LLM） */
+    @GetMapping("/{id}/analysis")
+    public ResponseEntity<Map<String, Object>> personalizedAnalysis(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") Long userId) {
+        if (userId <= 0) {
+            return ResponseEntity.ok(Map.of("code", 200, "data", Map.of()));
+        }
+        try {
+            // 确认情报存在
+            intelligenceRepository.findById(id)
+                    .orElseThrow(() -> new NoSuchElementException("Intelligence not found: " + id));
+
+            Map<String, Object> personalized = new LinkedHashMap<>();
+
+            // 用户画像卡片
+            UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
+            if (profile != null) {
+                Map<String, Object> profileCard = new LinkedHashMap<>();
+                profileCard.put("investorType", profile.getInvestorType());
+                profileCard.put("investmentCycle", profile.getInvestmentCycle());
+                profileCard.put("focusAreas", profile.getFocusAreas() != null
+                        ? List.of(profile.getFocusAreas().split(",")) : List.of());
+                var holdings = userHoldingRepository.findByUserId(userId);
+                profileCard.put("holdings", holdings.stream().map(h -> {
+                    Map<String, Object> hm = new LinkedHashMap<>();
+                    hm.put("stockCode", h.getStockCode());
+                    hm.put("stockName", h.getStockName());
+                    hm.put("sector", h.getSector());
+                    hm.put("percentage", h.getPercentage());
+                    hm.put("costPrice", h.getCostPrice());
+                    return hm;
+                }).toList());
+                personalized.put("userProfile", profileCard);
+            } else {
+                personalized.put("userProfile", null);
+            }
+
+            // LLM 分析
+            Map<String, Object> analysis = analysisService.generateAnalysis(userId, id);
+            personalized.put("analysis", analysis.get("analysis"));
+            personalized.put("impacts", analysis.get("impacts"));
+            personalized.put("suggestion", analysis.get("suggestion"));
+            personalized.put("risks", analysis.get("risks"));
+            personalized.put("userContext", analysis.get("userContext"));
+
+            return ResponseEntity.ok(Map.of("code", 200, "data", personalized));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(404).body(Map.of("code", 404, "message", e.getMessage()));
+        } catch (Exception e) {
+            log.warn("Analysis failed for intel {}: {}", id, e.getMessage());
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("userProfile", null);
+            fallback.put("analysis", null);
+            fallback.put("impacts", List.of());
+            fallback.put("suggestion", null);
+            fallback.put("risks", List.of());
+            return ResponseEntity.ok(Map.of("code", 200, "data", fallback));
         }
     }
 

@@ -10,6 +10,7 @@ import com.example.demo.service.NewsCollectorService;
 import com.example.demo.service.SmartQueryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -101,6 +102,24 @@ public class NewsController {
                 )).toList()
         ));
     }
+
+    /** 智能问答（流式）：语义检索 + LLM 流式推理，SSE 输出 */
+    @GetMapping("/query/stream")
+    public SseEmitter streamQuery(@RequestParam String question) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        if (question == null || question.isBlank()) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data("question不能为空"));
+                emitter.complete();
+            } catch (Exception ignored) {}
+            return emitter;
+        }
+        emitter.onTimeout(emitter::complete);
+        new Thread(() -> smartQueryService.streamQuery(question, emitter)).start();
+        return emitter;
+    }
+
+
 
     /** 系统状态 */
     @GetMapping("/stats")

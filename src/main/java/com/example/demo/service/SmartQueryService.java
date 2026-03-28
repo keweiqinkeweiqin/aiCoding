@@ -12,6 +12,15 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -24,12 +33,18 @@ public class SmartQueryService {
     private final NewsArticleRepository newsArticleRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final HttpClient streamHttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 
     @Value("${spring.ai.openai.base-url}")
     private String baseUrl;
 
     @Value("${spring.ai.openai.api-key}")
     private String apiKey;
+
+    @Value("${spring.ai.openai.chat.options.model:GPT-5.4}")
+    private String modelName;
 
     public SmartQueryService(VectorSearchService vectorSearchService,
                              NewsArticleRepository newsArticleRepository,
@@ -92,7 +107,7 @@ public class SmartQueryService {
         headers.set("Authorization", "Bearer " + apiKey);
 
         Map<String, Object> body = Map.of(
-                "model", "Qwen3.5-flash",
+                "model", modelName,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userPrompt)
@@ -109,4 +124,161 @@ public class SmartQueryService {
     }
 
     public record QueryResult(String answer, List<NewsArticle> relatedNews, int matchedCount) {}
+
+    /**
+     * Streaming query: first emit related news metadata, then stream LLM answer token by token.
+     * SSE events:
+     *   event: meta     — JSON with matchedCount + relatedNews
+     *   event: token    — partial text chunk
+     *   event: done     — empty, signals completion
+     *   event: error    — error message
+     */
+    public void streamQuery(String userQuestion, SseEmitter emitter) {
+        try {
+            // 1. Semantic search (same as sync)
+            List<Long> articleIds = vectorSearchService.semanticSearch(userQuestion, 15);
+            List<NewsArticle> relatedArticles = articleIds.stream()
+                    .map(newsArticleRepository::findById)
+                    .filter(java.util.Optional::isPresent)
+                    .map(java.util.Optional::get)
+                    .toList();
+
+            // 2. Emit metadata first
+            Map<String, Object> meta = Map.of(
+                    "matchedCount", relatedArticles.size(),
+                    "relatedNews", relatedArticles.stream().map(n -> Map.of(
+                            "id", n.getId(),
+                            "title", n.getTitle(),
+                            "sourceName", n.getSourceName() != null ? n.getSourceName() : "",
+                            "credibilityLevel", n.getCredibilityLevel() != null ? n.getCredibilityLevel() : "unknown",
+                            "sourceUrl", n.getSourceUrl() != null ? n.getSourceUrl() : ""
+                    )).toList()
+            );
+            emitter.send(SseEmitter.event().name("meta").data(objectMapper.writeValueAsString(meta)));
+
+            if (relatedArticles.isEmpty()) {
+                emitter.send(SseEmitter.event().name("token").data("暂无相关新闻数据，请先采集新闻。"));
+                emitter.send(SseEmitter.event().name("done").data(""));
+                emitter.complete();
+                return;
+            }
+
+            // 3. Build prompt (same as sync)
+            String newsContext = relatedArticles.stream()
+                    .map(a -> {
+                        String body = a.getSummary() != null && !a.getSummary().isBlank()
+                                ? a.getSummary()
+                                : (a.getContent() != null && a.getContent().length() > 200
+                                        ? a.getContent().substring(0, 200) + "..."
+                                        : a.getContent());
+                        return String.format("[%s|%s] %s — %s",
+                                a.getSourceName(),
+                                a.getCredibilityLevel() != null ? a.getCredibilityLevel() : "unknown",
+                                a.getTitle(), body);
+                    })
+                    .collect(Collectors.joining("\n"));
+
+            String systemPrompt = "你是「华尔街之眼」AI投研助手，专注AI与科技投资领域。\n"
+                    + "基于提供的新闻数据回答用户问题。\n\n"
+                    + "输出格式要求（Markdown）：\n"
+                    + "1. 先用 2-3 句话给出**核心结论**\n"
+                    + "2. 用 ## 二级标题分段组织内容（如 ## 事件概述、## 市场影响、## 投资建议）\n"
+                    + "3. 关键数据和观点用 **加粗** 标注\n"
+                    + "4. 多条信息用有序或无序列表呈现\n"
+                    + "5. 标注信息来源及可信度（如 [财联社|权威]）\n"
+                    + "6. 区分事实与观点，给出投资相关的分析和建议\n"
+                    + "7. 如果信息不足，明确说明";
+
+            String userPrompt = String.format(
+                    "## 相关新闻（共%d条，按语义相关度排序）\n\n%s\n\n## 用户问题\n%s\n\n请基于以上新闻数据进行分析和回答。",
+                    relatedArticles.size(), newsContext, userQuestion);
+
+            // 4. Call LLM with stream=true
+            Map<String, Object> reqBody = Map.of(
+                    "model", modelName,
+                    "messages", List.of(
+                            Map.of("role", "system", "content", systemPrompt),
+                            Map.of("role", "user", "content", userPrompt)
+                    ),
+                    "temperature", 0.3,
+                    "stream", true
+            );
+
+            String jsonBody = objectMapper.writeValueAsString(reqBody);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/v1/chat/completions"))
+                    .timeout(Duration.ofSeconds(60))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            HttpResponse<java.io.InputStream> response = streamHttpClient.send(request,
+                    HttpResponse.BodyHandlers.ofInputStream());
+
+            int statusCode = response.statusCode();
+            if (statusCode != 200) {
+                // Read error body
+                String errorBody = new String(response.body().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                log.error("LLM stream returned HTTP {}: {}", statusCode, errorBody.length() > 500 ? errorBody.substring(0, 500) : errorBody);
+                emitter.send(SseEmitter.event().name("token").data("LLM 服务返回错误 (HTTP " + statusCode + ")，请稍后重试。"));
+                emitter.send(SseEmitter.event().name("done").data(""));
+                emitter.complete();
+                return;
+            }
+
+            log.info("LLM stream connected, reading chunks...");
+            boolean anyTokenSent = false;
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.startsWith("data: ")) continue;
+                    String data = line.substring(6).trim();
+                    if ("[DONE]".equals(data)) break;
+                    try {
+                        JsonNode chunk = objectMapper.readTree(data);
+                        JsonNode choices = chunk.path("choices");
+                        if (choices.isMissingNode() || !choices.isArray() || choices.isEmpty()) {
+                            log.debug("Stream chunk no choices: {}", data.length() > 200 ? data.substring(0, 200) : data);
+                            continue;
+                        }
+                        JsonNode delta = choices.get(0).path("delta");
+                        if (delta.isMissingNode()) {
+                            log.debug("Stream chunk no delta: {}", data.length() > 200 ? data.substring(0, 200) : data);
+                            continue;
+                        }
+                        // reasoning_content: model thinking process (Qwen/DeepSeek style)
+                        String reasoning = delta.path("reasoning_content").asText("");
+                        if (!reasoning.isEmpty()) {
+                            emitter.send(SseEmitter.event().name("reasoning").data(reasoning));
+                        }
+                        // content: actual answer
+                        String content = delta.path("content").asText("");
+                        if (!content.isEmpty()) {
+                            emitter.send(SseEmitter.event().name("token").data(content));
+                            anyTokenSent = true;
+                        }
+                    } catch (Exception ex) {
+                        log.warn("Stream chunk parse error: {}", ex.getMessage());
+                    }
+                }
+            }
+
+            if (!anyTokenSent) {
+                log.warn("LLM stream finished but no token/reasoning was emitted");
+                emitter.send(SseEmitter.event().name("token").data("AI 未返回有效内容，可能是模型名称配置有误或服务暂时不可用。"));
+            }
+
+            emitter.send(SseEmitter.event().name("done").data(""));
+            emitter.complete();
+        } catch (Exception e) {
+            log.error("Stream query failed: {}", e.getMessage());
+            try {
+                emitter.send(SseEmitter.event().name("error").data(e.getMessage()));
+                emitter.complete();
+            } catch (Exception ignored) {}
+        }
+    }
 }

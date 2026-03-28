@@ -114,26 +114,37 @@ if (!intelId) { document.getElementById('intelHeader').innerHTML = '<div style="
 
 const headers = { 'X-User-Id': userId, 'Content-Type': 'application/json' };
 
-// Parallel load
+// Phase 1: 快速加载（纯DB，秒回）
 Promise.all([
   fetch('/api/intelligences/' + intelId + '?userId=' + userId, { headers }).then(r => r.json()),
-  fetch('/api/profile?userId=' + userId, { headers }).then(r => r.json()).catch(() => null),
-  fetch('/api/intelligences/' + intelId + '/related?limit=5', { headers }).then(r => r.json()).catch(() => ({data:[]}))
-]).then(([intelRes, profileRes, relatedRes]) => {
+  fetch('/api/profile?userId=' + userId, { headers }).then(r => r.json()).catch(() => null)
+]).then(([intelRes, profileRes]) => {
   const intel = intelRes.data || intelRes;
   renderIntelHeader(intel);
   renderSources(intel.sources || []);
   renderContent(intel.content);
   renderProfile(profileRes);
-  // 如果详情接口已返回个性化分析，直接渲染；否则显示生成按钮
-  if (intel.personalizedAnalysis && (intel.personalizedAnalysis.analysis || (intel.personalizedAnalysis.impacts && intel.personalizedAnalysis.impacts.length))) {
-    renderAnalysisArea();
-    renderAnalysisResult(intel.personalizedAnalysis);
-    document.getElementById('generateBtn').innerHTML = '📊 重新生成报告';
-  } else {
-    renderAnalysisArea();
+  renderAnalysisArea();
+  renderRelated(intel.relatedIntelligences || []);
+
+  // Phase 2: 异步加载个性化分析（调LLM，慢）
+  if (userId && userId !== '0') {
+    document.getElementById('analysisResult').innerHTML = '<div style="color:#999;font-size:13px;padding:8px 0"><span class="loading-spinner" style="border-color:#1A73E8;border-top-color:transparent;width:14px;height:14px;margin-right:6px;vertical-align:middle"></span>正在生成个性化分析...</div>';
+    fetch('/api/intelligences/' + intelId + '/analysis?userId=' + userId, { headers })
+      .then(r => r.json())
+      .then(res => {
+        const pa = res.data || {};
+        if (pa.analysis || (pa.impacts && pa.impacts.length)) {
+          renderAnalysisResult(pa);
+          document.getElementById('generateBtn').innerHTML = '📊 重新生成报告';
+        } else {
+          document.getElementById('analysisResult').innerHTML = '';
+        }
+      })
+      .catch(() => {
+        document.getElementById('analysisResult').innerHTML = '';
+      });
   }
-  renderRelated((relatedRes.data || relatedRes || []));
 });
 
 function renderIntelHeader(d) {

@@ -322,110 +322,211 @@ async function toggleIntelDetail(id) {
   }
   expandedIntelId = id;
 
-  detailEl.innerHTML = '<div class="loading" style="margin-top:12px">加载详情</div>';
+  // Render skeleton with API call status panel + content slots
+  detailEl.innerHTML = `<div class="intel-detail-inline" onclick="event.stopPropagation()">
+    <div style="margin-bottom:16px;padding:14px;background:#0d1235;border:1px solid #2a3070;border-radius:10px">
+      <div style="font-size:13px;color:#ffd700;margin-bottom:10px;font-weight:600">🔌 接口调用状态</div>
+      <div id="api-status-${id}" style="display:flex;flex-direction:column;gap:6px">
+        <div id="api-st-detail-${id}" class="api-status-row">⏳ <code>GET /api/intelligences/${id}</code> <span class="api-tag">基础详情</span></div>
+        <div id="api-st-related-${id}" class="api-status-row">⏳ <code>GET /api/intelligences/${id}/related</code> <span class="api-tag">相关情报</span></div>
+        <div id="api-st-analysis-${id}" class="api-status-row">⏳ <code>GET /api/intelligences/${id}/analysis</code> <span class="api-tag">个性化分析 (LLM)</span></div>
+      </div>
+    </div>
+    <div id="intel-detail-content-${id}"></div>
+    <div id="intel-sources-${id}"></div>
+    <div id="intel-related-${id}"></div>
+    <div id="intel-pa-${id}"></div>
+  </div>`;
 
+  // Fire all 3 API calls in parallel
+  fetchIntelDetail(id);
+  fetchIntelRelated(id);
+  fetchIntelAnalysis(id);
+}
+
+function updateApiStatus(id, key, status, ms, error) {
+  const el = document.getElementById('api-st-' + key + '-' + id);
+  if (!el) return;
+  if (status === 'ok') {
+    el.innerHTML = el.innerHTML.replace(/^⏳/, '✅').replace(/⏳/, '✅');
+    el.style.color = '#22c55e';
+    el.innerHTML += ` <span style="color:#6b7280;font-size:11px">${ms}ms</span>`;
+  } else {
+    el.innerHTML = el.innerHTML.replace(/^⏳/, '❌').replace(/⏳/, '❌');
+    el.style.color = '#ef4444';
+    el.innerHTML += ` <span style="color:#ef4444;font-size:11px">${error || 'failed'} (${ms}ms)</span>`;
+  }
+}
+
+async function fetchIntelDetail(id) {
+  const t0 = performance.now();
   try {
-    const detailRes = await fetch(API + '/api/intelligences/' + id + '?userId=' + currentUserId);
-    const detail = (await detailRes.json()).data;
+    const r = await fetch(API + '/api/intelligences/' + id + '?userId=' + currentUserId);
+    const ms = Math.round(performance.now() - t0);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const detail = (await r.json()).data;
+    updateApiStatus(id, 'detail', 'ok', ms);
+    renderIntelDetailContent(id, detail);
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    updateApiStatus(id, 'detail', 'err', ms, e.message);
+    const el = document.getElementById('intel-detail-content-' + id);
+    if (el) el.innerHTML = `<div style="color:#ef4444;font-size:13px;padding:8px">基础详情加载失败: ${esc(e.message)}</div>`;
+  }
+}
 
-    let html = `<div class="intel-detail-inline" onclick="event.stopPropagation()">`;
+function renderIntelDetailContent(id, detail) {
+  const el = document.getElementById('intel-detail-content-' + id);
+  if (!el) return;
+  let html = '';
 
-    // Content
-    if (detail.content) {
-      html += `<div style="font-size:14px;color:#e0e0e0;line-height:1.8;margin-bottom:16px;padding:14px;background:#0a0e27;border-radius:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(detail.content)}</div>`;
-    }
+  // Content (LLM generated body)
+  if (detail.content) {
+    html += `<div style="font-size:14px;color:#e0e0e0;line-height:1.8;margin-bottom:16px;padding:14px;background:#0a0e27;border-radius:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(detail.content)}</div>`;
+  }
 
-    // === Personalized Analysis Section ===
-    if (detail.personalizedAnalysis) {
-      const pa = detail.personalizedAnalysis;
-      const hasAnalysis = pa.analysis || (pa.impacts && pa.impacts.length) || pa.suggestion;
+  // Related stocks
+  if (detail.relatedStocks) {
+    html += `<div style="margin-bottom:12px">
+      <span style="font-size:12px;color:#8890b5;margin-right:8px">关联股票:</span>
+      ${detail.relatedStocks.split(',').map(s => `<span class="tag" style="color:#fbbf24;border:1px solid rgba(251,191,36,0.3)">${esc(s.trim())}</span>`).join('')}
+    </div>`;
+  }
 
-      html += `<div id="intel-analysis-${id}" style="margin-bottom:16px;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-radius:10px">`;
-      html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:14px;color:#c4b5fd;font-weight:600">🎯 个性化研判</div>
-        <button onclick="generateIntelAnalysis(${id})" class="btn btn-purple" id="btnIntelAnalysis-${id}" style="font-size:12px;padding:5px 14px">${hasAnalysis ? '🔄 重新研判' : '🧠 生成研判'}</button>
+  el.innerHTML = html;
+
+  // Sources section
+  const srcEl = document.getElementById('intel-sources-' + id);
+  if (srcEl && detail.sources && detail.sources.length) {
+    let srcHtml = `<div style="margin-bottom:16px">
+      <div style="font-size:13px;color:#7c3aed;margin-bottom:8px;font-weight:600">📎 信息来源 (${detail.sources.length})</div>`;
+    detail.sources.forEach(s => {
+      srcHtml += `<div style="background:#0a0e27;border:1px solid #2a3070;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center">
+          ${credibilityTag(s.credibilityTag)}
+          <span style="font-size:13px;color:#e0e0e0">${esc(s.sourceName || '')}</span>
+          <span style="font-size:11px;color:#6b7280">— ${esc(s.title || '')}</span>
+        </div>
+        ${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" style="font-size:12px;color:#3b82f6;text-decoration:none;white-space:nowrap" onclick="event.stopPropagation()">查看原文 ↗</a>` : ''}
       </div>`;
+    });
+    srcHtml += '</div>';
+    srcEl.innerHTML = srcHtml;
+  }
+}
 
-      // User profile card
-      if (pa.userProfile) {
-        const up = pa.userProfile;
-        html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">`;
-        if (up.investorType) html += `<span class="tag tag-active">类型: ${esc(up.investorType)}</span>`;
-        if (up.investmentCycle) html += `<span class="tag tag-active">周期: ${esc(up.investmentCycle)}</span>`;
-        if (up.focusAreas) html += `<span class="tag tag-active">关注: ${esc(up.focusAreas)}</span>`;
-        html += `</div>`;
-      }
+async function fetchIntelRelated(id) {
+  const t0 = performance.now();
+  try {
+    const r = await fetch(API + '/api/intelligences/' + id + '/related?limit=5');
+    const ms = Math.round(performance.now() - t0);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const items = d.data || [];
+    updateApiStatus(id, 'related', 'ok', ms);
+    renderIntelRelated(id, items);
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    updateApiStatus(id, 'related', 'err', ms, e.message);
+  }
+}
 
-      html += `<div id="intel-analysis-content-${id}">`;
+function renderIntelRelated(id, items) {
+  const el = document.getElementById('intel-related-' + id);
+  if (!el || !items.length) return;
+  let html = `<div style="margin-bottom:16px">
+    <div style="font-size:13px;color:#059669;margin-bottom:8px;font-weight:600">📎 相关情报 (${items.length})</div>`;
+  items.forEach(i => {
+    html += `<div style="background:#0a0e27;border:1px solid #2a3070;border-radius:8px;padding:10px 14px;margin-bottom:6px;cursor:pointer" onclick="event.stopPropagation();toggleIntelDetail(${i.id})">
+      <div style="font-size:13px;color:#e0e0e0;font-weight:600">${esc(i.title || '')}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:4px;display:flex;gap:8px">
+        <span>${esc(i.primarySource || '')}</span>
+        <span>${timeAgo(i.latestArticleTime)}</span>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
 
-      if (hasAnalysis) {
-        // Impacts
-        if (pa.impacts && pa.impacts.length) {
-          html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
-          pa.impacts.forEach(imp => {
-            html += `<div class="impact-card">
-              <div class="impact-stock">${esc(imp.stock || imp.stockCode || '')}</div>
-              <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || imp.description || '')}</span></div>
-              ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
-              ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
-            </div>`;
-          });
-          html += `</div>`;
-        }
+async function fetchIntelAnalysis(id) {
+  const t0 = performance.now();
+  const el = document.getElementById('intel-pa-' + id);
+  if (el) el.innerHTML = '<div style="color:#8890b5;font-size:12px;padding:8px">⏳ 等待个性化分析...</div>';
+  try {
+    const r = await fetch(API + '/api/intelligences/' + id + '/analysis?userId=' + currentUserId);
+    const ms = Math.round(performance.now() - t0);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const pa = d.data || {};
+    updateApiStatus(id, 'analysis', 'ok', ms);
+    renderIntelPersonalizedAnalysis(id, pa);
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    updateApiStatus(id, 'analysis', 'err', ms, e.message);
+    if (el) el.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:8px">个性化分析失败: ${esc(e.message)}</div>`;
+  }
+}
 
-        // Suggestion
-        if (pa.suggestion) {
-          html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
-            <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
-            <div style="font-size:13px;color:#e0e0e0">${esc(pa.suggestion)}</div>
-          </div>`;
-        }
+function renderIntelPersonalizedAnalysis(id, pa) {
+  const el = document.getElementById('intel-pa-' + id);
+  if (!el) return;
+  const hasAnalysis = pa.analysis || (pa.impacts && pa.impacts.length) || pa.suggestion;
+  if (!hasAnalysis && !pa.userProfile) {
+    el.innerHTML = '';
+    return;
+  }
 
-        // Risks
-        if (pa.risks && pa.risks.length) {
-          html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
-            <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
-            ${pa.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
-          </div>`;
-        }
-      } else {
-        html += `<div style="color:#8890b5;font-size:13px;padding:8px 0">暂无研判结果，点击上方按钮生成</div>`;
-      }
+  let html = `<div style="margin-bottom:16px;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-radius:10px">`;
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:14px;color:#c4b5fd;font-weight:600">🎯 个性化研判</div>
+    <button onclick="generateIntelAnalysis(${id})" class="btn btn-purple" id="btnIntelAnalysis-${id}" style="font-size:12px;padding:5px 14px">${hasAnalysis ? '🔄 重新研判' : '🧠 生成研判'}</button>
+  </div>`;
 
-      html += `</div>`; // close intel-analysis-content
-      html += `</div>`; // close intel-analysis
-    }
+  // User profile card
+  if (pa.userProfile) {
+    const up = pa.userProfile;
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">`;
+    if (up.investorType) html += `<span class="tag tag-active">类型: ${esc(up.investorType)}</span>`;
+    if (up.investmentCycle) html += `<span class="tag tag-active">周期: ${esc(up.investmentCycle)}</span>`;
+    if (up.focusAreas && up.focusAreas.length) html += `<span class="tag tag-active">关注: ${esc(Array.isArray(up.focusAreas) ? up.focusAreas.join(',') : up.focusAreas)}</span>`;
+    html += `</div>`;
+  }
 
-    // Sources
-    if (detail.sources && detail.sources.length) {
-      html += `<div style="margin-bottom:16px">
-        <div style="font-size:13px;color:#7c3aed;margin-bottom:8px;font-weight:600">📎 信息来源 (${detail.sources.length})</div>`;
-      detail.sources.forEach(s => {
-        html += `<div style="background:#0a0e27;border:1px solid #2a3070;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-          <div style="display:flex;gap:8px;align-items:center">
-            ${credibilityTag(s.credibilityTag)}
-            <span style="font-size:13px;color:#e0e0e0">${esc(s.sourceName || '')}</span>
-            <span style="font-size:11px;color:#6b7280">— ${esc(s.title || '')}</span>
-          </div>
-          ${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" style="font-size:12px;color:#3b82f6;text-decoration:none;white-space:nowrap" onclick="event.stopPropagation()">查看原文 ↗</a>` : ''}
+  html += `<div id="intel-analysis-content-${id}">`;
+  if (hasAnalysis) {
+    if (pa.impacts && pa.impacts.length) {
+      html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
+      pa.impacts.forEach(imp => {
+        html += `<div class="impact-card">
+          <div class="impact-stock">${esc(imp.stock || imp.stockCode || '')}</div>
+          <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || imp.description || '')}</span></div>
+          ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
+          ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
         </div>`;
       });
-      html += '</div>';
+      html += `</div>`;
     }
-
-    // Related stocks
-    if (detail.relatedStocks) {
-      html += `<div style="margin-bottom:12px">
-        <span style="font-size:12px;color:#8890b5;margin-right:8px">关联股票:</span>
-        ${detail.relatedStocks.split(',').map(s => `<span class="tag" style="color:#fbbf24;border:1px solid rgba(251,191,36,0.3)">${esc(s.trim())}</span>`).join('')}
+    if (pa.suggestion) {
+      html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
+        <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
+        <div style="font-size:13px;color:#e0e0e0">${esc(pa.suggestion)}</div>
       </div>`;
     }
-
-    html += '</div>';
-    detailEl.innerHTML = html;
-  } catch (e) {
-    detailEl.innerHTML = `<div style="color:#ef4444;padding:12px;font-size:13px">加载详情失败: ${e.message}</div>`;
+    if (pa.risks && pa.risks.length) {
+      html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
+        <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
+        ${pa.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
+      </div>`;
+    }
+    if (pa.analysis) {
+      html += `<div style="font-size:13px;color:#e0e0e0;line-height:1.7;white-space:pre-wrap;margin-top:12px;padding:10px;background:#0a0e27;border-radius:8px">${esc(pa.analysis)}</div>`;
+    }
+  } else {
+    html += `<div style="color:#8890b5;font-size:13px;padding:8px 0">暂无研判结果，点击上方按钮生成</div>`;
   }
+  html += `</div></div>`;
+  el.innerHTML = html;
 }
 
 // ============================================================
@@ -1060,11 +1161,12 @@ async function deleteHolding(holdingId) {
 
 function initQueryPanel() {
   document.getElementById('panel-query').innerHTML = `
-    <div class="section-title">🤖 智能问答 <span style="font-size:12px;color:#8890b5;font-weight:400">语义检索 + LLM推理</span></div>
+    <div class="section-title">🤖 智能问答 <span style="font-size:12px;color:#8890b5;font-weight:400">语义检索 + LLM流式推理</span></div>
     <div style="display:flex;gap:10px;margin-bottom:16px">
       <input id="queryInput" type="text" class="input" placeholder="输入问题，如：英伟达最近有什么利好消息？"
         onkeydown="if(event.key==='Enter')doQuery()" style="flex:1">
       <button onclick="doQuery()" id="queryBtn" class="btn btn-purple">🔍 分析</button>
+      <button onclick="abortQuery()" id="queryAbortBtn" class="btn btn-ghost" style="display:none">⏹ 停止</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="setQuery('AI芯片行业最近有什么重大变化？')" class="qbtn">AI芯片动态</button>
@@ -1076,7 +1178,43 @@ function initQueryPanel() {
   `;
 }
 
+/** 将 LLM 纯文本转为带格式的 HTML */
+function formatLlmAnswer(text) {
+  if (!text) return '';
+  // 先 escape HTML
+  let s = esc(text);
+  // **bold**
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#ffd700">$1</strong>');
+  // ### / ## / # headings (行首)
+  s = s.replace(/^###\s*(.+)$/gm, '<div style="font-size:14px;font-weight:700;color:#c4b5fd;margin:14px 0 6px">$1</div>');
+  s = s.replace(/^##\s*(.+)$/gm, '<div style="font-size:15px;font-weight:700;color:#c4b5fd;margin:16px 0 8px">$1</div>');
+  s = s.replace(/^#\s*(.+)$/gm, '<div style="font-size:16px;font-weight:700;color:#ffd700;margin:18px 0 8px">$1</div>');
+  // 无序列表 - / • / ·
+  s = s.replace(/^[\-•·]\s+(.+)$/gm, '<div style="padding-left:16px;position:relative;margin:3px 0"><span style="position:absolute;left:0;color:#7c3aed">•</span>$1</div>');
+  // 有序列表 1. 2. 3.
+  s = s.replace(/^(\d+)\.\s+(.+)$/gm, '<div style="padding-left:20px;position:relative;margin:3px 0"><span style="position:absolute;left:0;color:#fbbf24;font-weight:600;font-size:12px">$1.</span>$2</div>');
+  // 空行 → 段落间距
+  s = s.replace(/\n\n+/g, '<div style="height:10px"></div>');
+  // 单换行
+  s = s.replace(/\n/g, '<br>');
+  return s;
+}
+
 function setQuery(q) { document.getElementById('queryInput').value = q; }
+
+let currentQuerySource = null;
+
+function abortQuery() {
+  if (currentQuerySource) {
+    currentQuerySource.close();
+    currentQuerySource = null;
+  }
+  const btn = document.getElementById('queryBtn');
+  const abortBtn = document.getElementById('queryAbortBtn');
+  btn.disabled = false;
+  btn.textContent = '🔍 分析';
+  abortBtn.style.display = 'none';
+}
 
 async function doQuery() {
   const input = document.getElementById('queryInput');
@@ -1084,35 +1222,151 @@ async function doQuery() {
   if (!q) return;
   const result = document.getElementById('queryResult');
   const btn = document.getElementById('queryBtn');
+  const abortBtn = document.getElementById('queryAbortBtn');
   btn.disabled = true;
-  btn.textContent = '⏳ 分析中...';
-  result.innerHTML = '<div class="loading">正在语义检索相关新闻并调用AI分析</div>';
-  try {
-    const r = await fetch(API + '/api/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q })
-    });
-    const d = await r.json();
-    let html = `<div class="card" style="border-left:3px solid #7c3aed">
-      <div style="font-size:12px;color:#7c3aed;margin-bottom:8px;font-weight:500">AI 分析结果（匹配 ${d.matchedCount} 条相关新闻）</div>
-      <div style="font-size:14px;line-height:1.8;color:#e0e0e0;white-space:pre-wrap">${esc(d.answer)}</div>
-    </div>`;
-    if (d.relatedNews && d.relatedNews.length) {
-      html += '<div style="font-size:13px;color:#8890b5;margin:12px 0 8px;font-weight:500">📎 参考新闻来源</div>';
-      d.relatedNews.forEach(n => {
-        html += `<div style="font-size:12px;color:#6b7280;padding:6px 0;border-bottom:1px solid rgba(42,48,112,0.3);display:flex;justify-content:space-between;align-items:center">
-          <span>• [${esc(n.sourceName)}] ${esc(n.title)}</span>
-          ${n.sourceUrl ? `<a href="${esc(n.sourceUrl)}" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:11px;white-space:nowrap;margin-left:8px">查看 ↗</a>` : ''}
-        </div>`;
-      });
+  btn.textContent = '⏳ 检索中...';
+  abortBtn.style.display = '';
+
+  // Render skeleton
+  result.innerHTML = `
+    <div id="queryMeta" style="margin-bottom:12px">
+      <div class="loading">正在语义检索相关新闻...</div>
+    </div>
+    <div id="queryThinkingBlock" style="display:none;margin-bottom:12px">
+      <details id="queryThinkingDetails" open>
+        <summary style="font-size:13px;color:#f59e0b;cursor:pointer;padding:8px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:10px 10px 0 0;user-select:none;display:flex;align-items:center;gap:6px">
+          <span>💭</span> <span id="queryThinkingLabel">思考中...</span>
+        </summary>
+        <div id="queryThinkingText" style="padding:12px 16px;font-size:12px;line-height:1.7;color:#9ca3af;background:#0d1235;border:1px solid rgba(245,158,11,0.15);border-top:none;border-radius:0 0 10px 10px;max-height:300px;overflow-y:auto;white-space:pre-wrap"></div>
+      </details>
+    </div>
+    <div style="background:#151a40;border:1px solid #2a3070;border-radius:12px;overflow:hidden;margin-bottom:16px">
+      <div style="padding:12px 16px;background:linear-gradient(135deg,rgba(124,58,237,0.15),rgba(99,102,241,0.08));border-bottom:1px solid #2a3070;display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">🤖</span>
+        <span style="font-size:13px;color:#c4b5fd;font-weight:600" id="queryAnswerLabel">AI 分析中...</span>
+      </div>
+      <div id="queryAnswerText" style="padding:16px 20px;font-size:14px;line-height:1.85;color:#e0e0e0;min-height:60px"><span class="loading" style="padding:0">等待 LLM 响应</span></div>
+    </div>
+    <div id="queryRelatedNews"></div>
+  `;
+
+  const url = API + '/api/query/stream?question=' + encodeURIComponent(q);
+  const eventSource = new EventSource(url);
+  currentQuerySource = eventSource;
+  let answerText = '';
+  let reasoningText = '';
+  let firstToken = true;
+  let firstReasoning = true;
+  let matchedCount = 0;
+
+  eventSource.addEventListener('meta', function(e) {
+    try {
+      const meta = JSON.parse(e.data);
+      matchedCount = meta.matchedCount || 0;
+      const metaEl = document.getElementById('queryMeta');
+      metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px">
+        <span style="font-size:14px">🔍</span>
+        <span style="font-size:13px;color:#c4b5fd">语义匹配到 <b style="color:#ffd700">${meta.matchedCount}</b> 条相关新闻，正在生成分析...</span>
+      </div>`;
+      btn.textContent = '⏳ 生成中...';
+
+      // Render related news as collapsible cards
+      if (meta.relatedNews && meta.relatedNews.length) {
+        const newsEl = document.getElementById('queryRelatedNews');
+        let html = `<details style="margin-top:4px">
+          <summary style="font-size:13px;color:#8890b5;cursor:pointer;padding:8px 0;user-select:none;display:flex;align-items:center;gap:6px">
+            <span>📎</span> 参考新闻来源 (${meta.relatedNews.length}条)
+          </summary>
+          <div style="display:grid;gap:6px;padding:8px 0">`;
+        meta.relatedNews.forEach(function(n) {
+          const credColor = n.credibilityLevel === 'authoritative' ? '#065f46' : n.credibilityLevel === 'normal' ? '#92400e' : '#6b7280';
+          html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#0d1235;border:1px solid #1e2555;border-radius:8px">
+            <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${credColor};color:#fff;white-space:nowrap">${esc(n.credibilityLevel || '')}</span>
+            <span style="font-size:12px;color:#8890b5;white-space:nowrap">${esc(n.sourceName)}</span>
+            <span style="font-size:12px;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.title)}</span>
+            ${n.sourceUrl ? '<a href="' + esc(n.sourceUrl) + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:11px;white-space:nowrap">原文↗</a>' : ''}
+          </div>`;
+        });
+        html += '</div></details>';
+        newsEl.innerHTML = html;
+      }
+    } catch (err) { console.warn('meta parse error', err); }
+  });
+
+  eventSource.addEventListener('reasoning', function(e) {
+    const block = document.getElementById('queryThinkingBlock');
+    if (firstReasoning) {
+      block.style.display = 'block';
+      btn.textContent = '⏳ 思考中...';
+      firstReasoning = false;
     }
-    result.innerHTML = html;
-  } catch (e) {
-    result.innerHTML = `<div class="card" style="border-color:#ef4444"><div style="color:#ef4444">查询失败: ${e.message}</div></div>`;
-  }
-  btn.disabled = false;
-  btn.textContent = '🔍 分析';
+    reasoningText += e.data;
+    const textEl = document.getElementById('queryThinkingText');
+    textEl.textContent = reasoningText;
+    textEl.scrollTop = textEl.scrollHeight;
+  });
+
+  eventSource.addEventListener('token', function(e) {
+    if (firstToken) {
+      document.getElementById('queryAnswerText').innerHTML = '';
+      // Collapse thinking when answer starts
+      if (!firstReasoning) {
+        const details = document.getElementById('queryThinkingDetails');
+        if (details) details.removeAttribute('open');
+        document.getElementById('queryThinkingLabel').textContent = '思考过程（点击展开）';
+      }
+      btn.textContent = '⏳ 输出中...';
+      firstToken = false;
+    }
+    answerText += e.data;
+    document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText) + '<span style="display:inline-block;width:2px;height:14px;background:#7c3aed;margin-left:2px;vertical-align:middle;animation:blink 1s step-end infinite"></span>';
+  });
+
+  eventSource.addEventListener('done', function() {
+    eventSource.close();
+    currentQuerySource = null;
+    btn.disabled = false;
+    btn.textContent = '🔍 分析';
+    abortBtn.style.display = 'none';
+    // Final render without cursor
+    document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText);
+    document.getElementById('queryAnswerLabel').textContent = 'AI 分析结果（基于 ' + matchedCount + ' 条新闻）';
+    // Finalize thinking block label
+    if (!firstReasoning) {
+      document.getElementById('queryThinkingLabel').textContent = '思考过程（' + reasoningText.length + '字）';
+    }
+    // Update meta bar
+    const metaEl = document.getElementById('queryMeta');
+    if (metaEl) {
+      metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px">
+        <span style="font-size:14px">✅</span>
+        <span style="font-size:13px;color:#4ade80">分析完成，基于 <b style="color:#ffd700">${matchedCount}</b> 条新闻生成</span>
+      </div>`;
+    }
+  });
+
+  eventSource.addEventListener('error', function(e) {
+    eventSource.close();
+    currentQuerySource = null;
+    btn.disabled = false;
+    btn.textContent = '🔍 分析';
+    abortBtn.style.display = 'none';
+    if (!answerText) {
+      document.getElementById('queryAnswerText').innerHTML = '<span style="color:#ef4444">查询失败，请重试</span>';
+    }
+  });
+
+  eventSource.onerror = function() {
+    // EventSource auto-reconnects; we close on first error to avoid loops
+    eventSource.close();
+    currentQuerySource = null;
+    btn.disabled = false;
+    btn.textContent = '🔍 分析';
+    abortBtn.style.display = 'none';
+    if (!answerText) {
+      document.getElementById('queryAnswerText').innerHTML = '<span style="color:#ef4444">连接中断，请重试</span>';
+    }
+  };
 }
 
 // ============================================================

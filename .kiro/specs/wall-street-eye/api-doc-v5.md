@@ -136,9 +136,9 @@ Response (scene=admin):
 
 ## 4. 情报详情页
 
-### GET /api/intelligences/{id} — 情报详情（含个性化分析）
+### GET /api/intelligences/{id} — 情报详情（纯DB，秒回）
 
-Params: `?userId=1`（传 userId 触发个性化分析，不传则 personalizedAnalysis 为 null）
+Params: `?userId=1`（保留兼容，当前未使用）
 
 Response:
 ```json
@@ -146,7 +146,7 @@ Response:
   "code": 200,
   "data": {
     "id": 1, "priority": "high", "title": "...", "summary": "...",
-    "content": "LLM综合生成的分析正文...",
+    "content": "LLM综合生成的分析正文（聚类时预生成）...",
     "primarySource": "财联社",
     "credibilityLevel": "authoritative", "credibilityScore": 0.87,
     "sourceCount": 3, "sentiment": "positive", "sentimentScore": 0.8,
@@ -163,33 +163,59 @@ Response:
         "primarySource": "36Kr", "sourceCount": 2, "credibilityScore": 0.75,
         "latestArticleTime": "2026-03-26T14:00:00" }
     ],
-    "personalizedAnalysis": {
-      "userProfile": {
-        "investorType": "growth", "investmentCycle": "medium",
-        "focusAreas": ["AI芯片", "云计算"],
-        "holdings": [
-          { "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
-          { "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
-        ]
-      },
-      "analysis": "基于多来源交叉验证...",
-      "impacts": [
-        { "stock": "NVDA", "impact": "中国区收入预计下降15-20%",
-          "level": "重大影响", "volatility": "±8%" }
-      ],
-      "suggestion": "短期观望NVDA，关注国产AI芯片替代标的",
-      "risks": ["政策进一步收紧", "国产替代进度不及预期"],
-      "userContext": "基于成长型投资者画像"
-    }
+    "personalizedAnalysis": null
+  }
+}
+```
+
+content 生成逻辑：
+- 多来源（>=2 条新闻）：LLM 综合生成中文投研分析（400-600 字），包含事件概述、来源差异、市场影响、关注要点
+- 单来源：LLM 改写为投研快讯（200-300 字），包含核心事件概述和市场影响分析
+- LLM 失败时 fallback：拼接原始新闻内容（多来源用分隔线分隔，标注来源名）
+- 聚类完成后异步预生成，用户访问时直接读缓存
+- 可通过 `POST /api/intelligences/refresh-content` 清空缓存，下次访问时重新生成
+
+说明：
+- 纯 DB 查询，不调用 LLM，响应极快
+- `personalizedAnalysis` 固定返回 `null`，个性化分析请单独调用 `GET /{id}/analysis`
+- `relatedIntelligences` 内嵌返回，无需单独请求
+
+### GET /api/intelligences/{id}/analysis — 个性化分析（调LLM，慢）
+
+Params: `?userId=1`（必传，不传或传 0 返回空对象 `{}`）
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "userProfile": {
+      "investorType": "growth", "investmentCycle": "medium",
+      "focusAreas": ["AI芯片", "云计算"],
+      "holdings": [
+        { "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
+        { "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
+      ]
+    },
+    "analysis": "基于多来源交叉验证...",
+    "impacts": [
+      { "stock": "NVDA", "impact": "中国区收入预计下降15-20%",
+        "level": "重大影响", "volatility": "±8%" }
+    ],
+    "suggestion": "短期观望NVDA，关注国产AI芯片替代标的",
+    "risks": ["政策进一步收紧", "国产替代进度不及预期"],
+    "userContext": "基于成长型投资者画像"
   }
 }
 ```
 
 说明：
-- personalizedAnalysis：传 userId 且用户存在时返回，否则 null
-- userProfile.holdings：从 user_holdings 表读取完整持仓对象数组（含 stockCode/stockName/sector/percentage/costPrice），不再是简单字符串数组
-- LLM 分析有 15 秒超时保护，超时时 analysis 返回"分析超时，请稍后重试"
-- 已有缓存（1 小时内）时直接返回缓存，不重复调用 LLM
+- 从详情接口拆分出的独立接口，调用 LLM 生成个性化分析
+- 返回字段结构与原 `personalizedAnalysis` 完全一致
+- `userId` 不传或为 0 时返回空对象 `{}`
+- 前端应先渲染详情页（`GET /{id}`），再异步请求此接口填充分析区域
+- LLM 调用可能较慢（10-60秒），建议前端显示 loading 状态
+- LLM 失败时返回 fallback：analysis=null, impacts=[], suggestion=null, risks=[]
 
 ---
 
@@ -394,7 +420,7 @@ Response:
 
 ## 7. 智能问答
 
-### POST /api/query — 语义检索 + LLM 推理
+### POST /api/query — 语义检索 + LLM 推理（同步）
 
 Request:
 ```json
@@ -411,6 +437,37 @@ Response:
   ]
 }
 ```
+
+### GET /api/query/stream — 语义检索 + LLM 流式推理（SSE）
+
+Params: `?question=AI芯片行业最近有什么重大变化？`
+
+返回 SSE 事件流，分阶段推送：
+
+| 事件名 | 数据格式 | 说明 |
+|--------|----------|------|
+| `meta` | JSON `{"matchedCount":15,"relatedNews":[...]}` | 语义检索完成，推送匹配的新闻元数据 |
+| `reasoning` | 纯文本片段 | LLM 思考过程（reasoning_content），逐 token 推送 |
+| `token` | 纯文本片段 | LLM 逐 token 输出的回答内容 |
+| `done` | 空字符串 | 流式输出完成 |
+| `error` | 错误信息文本 | 出错时推送 |
+
+前端使用 `EventSource` 消费：
+```javascript
+const es = new EventSource('/api/query/stream?question=' + encodeURIComponent(q));
+es.addEventListener('meta', e => { /* 渲染新闻来源 */ });
+es.addEventListener('reasoning', e => { /* 展示思考过程（可折叠） */ });
+es.addEventListener('token', e => { /* 逐字追加到页面 */ });
+es.addEventListener('done', () => es.close());
+```
+
+说明：
+- 超时时间 120 秒
+- `meta` 事件在语义检索完成后立即推送，此时 LLM 尚未开始生成
+- `reasoning` 事件推送模型的思考过程（部分模型如 Qwen/DeepSeek 支持），前端可用可折叠区域展示
+- `reasoning` 阶段结束后开始推送 `token`，两者不会交叉出现
+- `token` 事件逐个推送 LLM 生成的文本片段，前端拼接即可
+- 原有 `POST /api/query` 同步接口保留，可用于不支持 SSE 的场景
 
 ---
 
