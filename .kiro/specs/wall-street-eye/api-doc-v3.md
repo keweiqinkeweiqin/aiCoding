@@ -157,39 +157,91 @@ marketOverview 说明：
 
 ## 二、用户画像模块 `/api/profile`
 
-> 用户画像与持仓合并为一张表 `user_profiles`，只提供一个保存接口。
+### 2.1 GET /api/profile — 查询画像
 
-### 2.1 PUT /api/profile/save — 保存完整画像（含持仓）
+Params: `?userId=1`
 
-Param: `?userId=1`
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "investorType": "growth",
+    "investmentCycle": "medium",
+    "focusAreas": "AI,chip,robot",
+    "holdings": "NVDA,TSM"
+  }
+}
+```
+
+### 2.2 PUT /api/profile — 保存画像
+
+Params: `?userId=1`
 
 Request:
 ```json
 {
   "investorType": "growth",
   "investmentCycle": "medium",
-  "focusAreas": ["AI", "chip", "robot"],
-  "holdings": ["英伟达", "台积电"]
+  "focusAreas": "AI,chip,robot",
+  "holdings": "NVDA,TSM"
 }
 ```
 
+所有字段可选，只更新传入的字段。新用户首次调用自动创建。
+
+### 2.3 GET /api/profile/full — C端完整画像查询
+
+Params: `?userId=1`
+
 Response:
 ```json
-{ "code": 200, "message": "saved" }
+{
+  "code": 200,
+  "data": {
+    "investorType": "growth",
+    "investmentCycle": "medium",
+    "focusAreas": ["AI", "chip", "robot"],
+    "holdings": "NVDA,TSM"
+  }
+}
 ```
 
-字段说明：
+区别：`focusAreas` 返回数组格式，方便前端直接渲染标签。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| investorType | string | 投资者类型：`conservative` / `balanced` / `growth` |
-| investmentCycle | string | 投资周期：`short` / `medium` / `long` |
-| focusAreas | string[] | 关注领域，如 `["AI", "chip", "robot"]` |
-| holdings | string[] | 持仓股票名称，如 `["英伟达", "台积电"]` |
+### 2.4 GET /api/auth/users — 用户列表（调试用）
 
-- 新用户首次调用自动创建画像
-- 已有用户调用则更新（按 userId upsert）
-- 所有字段均为可选，只更新传入的字段
+Response:
+```json
+{
+  "code": 200,
+  "data": [
+    { "userId": 1, "phone": "13800138000", "nickname": "Tom", "createdAt": "...", "lastLoginAt": "..." }
+  ]
+}
+```
+
+### 2.5 GET /api/auth/user-detail — 用户详情（含画像）
+
+Params: `?userId=1`
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "userId": 1,
+    "phone": "13800138000",
+    "nickname": "Tom",
+    "createdAt": "...",
+    "lastLoginAt": "...",
+    "investorType": "growth",
+    "investmentCycle": "medium",
+    "focusAreas": "AI,chip",
+    "holdings": "NVDA,TSM"
+  }
+}
+```
 
 ---
 
