@@ -1,5 +1,6 @@
 package com.example.demo.controller;
 
+import com.example.demo.embedding.VectorSearchService;
 import com.example.demo.model.Intelligence;
 import com.example.demo.model.UserHolding;
 import com.example.demo.model.UserProfile;
@@ -29,19 +30,22 @@ public class IntelligenceController {
     private final UserProfileRepository userProfileRepository;
     private final UserHoldingRepository userHoldingRepository;
     private final AnalysisService analysisService;
+    private final VectorSearchService vectorSearchService;
 
     public IntelligenceController(IntelligenceService intelligenceService,
                                   EventClusterService eventClusterService,
                                   IntelligenceRepository intelligenceRepository,
                                   UserProfileRepository userProfileRepository,
                                   UserHoldingRepository userHoldingRepository,
-                                  AnalysisService analysisService) {
+                                  AnalysisService analysisService,
+                                  VectorSearchService vectorSearchService) {
         this.intelligenceService = intelligenceService;
         this.eventClusterService = eventClusterService;
         this.intelligenceRepository = intelligenceRepository;
         this.userProfileRepository = userProfileRepository;
         this.userHoldingRepository = userHoldingRepository;
         this.analysisService = analysisService;
+        this.vectorSearchService = vectorSearchService;
     }
 
     /**
@@ -202,14 +206,22 @@ public class IntelligenceController {
             }).toList();
             data.put("sources", sources);
 
-            // 相关情报（纯DB查询）
+            // 相关情报（基于情报向量语义相似度）
             try {
-                var allRecent = intelligenceRepository
-                        .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
-                                java.time.LocalDateTime.now().minusHours(72));
-                var related = allRecent.stream()
-                        .filter(i -> !i.getId().equals(id))
+                List<VectorSearchService.ScoredId> similar =
+                        vectorSearchService.searchIntelligences(
+                                intel.getTitle() + " " + (intel.getSummary() != null ? intel.getSummary() : ""), 6);
+                List<Long> relatedIds = similar.stream()
+                        .filter(s -> !s.id().equals(id))
                         .limit(5)
+                        .map(VectorSearchService.ScoredId::id)
+                        .toList();
+                List<Intelligence> relatedIntels = intelligenceRepository.findAllById(relatedIds);
+                // 保持相似度排序
+                Map<Long, Integer> orderMap = new LinkedHashMap<>();
+                for (int idx = 0; idx < relatedIds.size(); idx++) orderMap.put(relatedIds.get(idx), idx);
+                relatedIntels.sort(Comparator.comparingInt(i -> orderMap.getOrDefault(i.getId(), 999)));
+                var related = relatedIntels.stream()
                         .map(i -> {
                             Map<String, Object> ri = new LinkedHashMap<>();
                             ri.put("id", i.getId());
@@ -297,20 +309,26 @@ public class IntelligenceController {
         }
     }
 
-    /** 相关情报推荐 */
+    /** 相关情报推荐（基于情报向量语义相似度） */
     @GetMapping("/{id}/related")
     public ResponseEntity<?> related(@PathVariable Long id,
                                      @RequestParam(defaultValue = "5") int limit) {
         try {
             var detail = intelligenceService.getDetail(id);
             var intel = detail.intelligence();
-            // Simple: return recent intelligences excluding self, sorted by time
-            var all = intelligenceRepository
-                    .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
-                            java.time.LocalDateTime.now().minusHours(72));
-            var related = all.stream()
-                    .filter(i -> !i.getId().equals(id))
+            String queryText = intel.getTitle() + " " + (intel.getSummary() != null ? intel.getSummary() : "");
+            List<VectorSearchService.ScoredId> similar =
+                    vectorSearchService.searchIntelligences(queryText, limit + 1);
+            List<Long> relatedIds = similar.stream()
+                    .filter(s -> !s.id().equals(id))
                     .limit(limit)
+                    .map(VectorSearchService.ScoredId::id)
+                    .toList();
+            List<Intelligence> relatedIntels = intelligenceRepository.findAllById(relatedIds);
+            Map<Long, Integer> orderMap = new LinkedHashMap<>();
+            for (int idx = 0; idx < relatedIds.size(); idx++) orderMap.put(relatedIds.get(idx), idx);
+            relatedIntels.sort(Comparator.comparingInt(i -> orderMap.getOrDefault(i.getId(), 999)));
+            var related = relatedIntels.stream()
                     .map(i -> {
                         Map<String, Object> item = new java.util.LinkedHashMap<>();
                         item.put("id", i.getId());

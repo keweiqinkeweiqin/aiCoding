@@ -91,7 +91,7 @@ Params: `?userId=1&hours=24&page=0&size=20&scene=home`
 | size | 20 | 每页条数（仅 scene=admin 生效） |
 | scene | home | `home`: C端首页模式；`admin`: 控制面板模式 |
 
-scene=home（默认）：每个优先级（high/medium/low）各返回一条，最多 3 条，个性化排序，不分页。
+scene=home（默认）：个性化排序后取前 3 条，不分页。
 
 Response (scene=home):
 ```json
@@ -179,7 +179,29 @@ content 生成逻辑：
 说明：
 - 纯 DB 查询，不调用 LLM，响应极快
 - `personalizedAnalysis` 固定返回 `null`，个性化分析请单独调用 `GET /{id}/analysis`
-- `relatedIntelligences` 内嵌返回，无需单独请求
+- `relatedIntelligences` 内嵌返回，也可通过 `GET /{id}/related` 单独请求（返回字段略有不同）
+
+### GET /api/intelligences/{id}/related — 相关情报
+
+Params: `?limit=5`
+
+Response:
+```json
+{
+  "code": 200,
+  "data": [
+    {
+      "id": 5, "title": "台积电3nm产能满载", "summary": "...",
+      "primarySource": "36Kr", "credibilityLevel": "authoritative",
+      "tags": "AI,chip", "latestArticleTime": "2026-03-26T14:00:00"
+    }
+  ]
+}
+```
+
+说明：
+- 返回最近 72 小时内的情报（排除自身），按时间倒序
+- 与详情接口内嵌的 `relatedIntelligences` 相比，此接口额外返回 `credibilityLevel` 和 `tags`，但不返回 `sourceCount` 和 `credibilityScore`
 
 ### GET /api/intelligences/{id}/analysis — 个性化分析（调LLM，慢）
 
@@ -637,7 +659,7 @@ Response:
 
 Params: `?userId=1&hours=72&page=0&size=50&scene=admin`
 
-控制面板使用 `scene=admin` 获取全量分页情报数据（区别于 C 端 `scene=home` 每个优先级只取一条）。
+控制面板使用 `scene=admin` 获取全量分页情报数据（区别于 C 端 `scene=home` 只取前 3 条）。
 
 Response 格式同第一部分"情报列表"的 `scene=admin` 响应。
 
