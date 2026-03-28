@@ -72,6 +72,7 @@ Response:
 - 未登录时 nickname 为"访客"，profileTag 为空
 - sentimentLabel 取值：偏多 / 中性 / 偏空
 - marketStatus 取值：市场情绪偏多/偏空/中性 + 情报数量
+- 首页不再内嵌推荐情报列表，情报数据请通过 `GET /api/intelligences` 单独获取
 
 ---
 
@@ -79,9 +80,40 @@ Response:
 
 ### GET /api/intelligences — 情报列表（个性化排序）
 
-Params: `?userId=1&hours=24&page=0&size=20`
+Params: `?userId=1&hours=24&page=0&size=20&scene=home`
 
-Response:
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| userId | 1 | 用户ID，用于个性化排序 |
+| hours | 24 | 查询最近N小时的情报 |
+| page | 0 | 页码（仅 scene=admin 生效） |
+| size | 20 | 每页条数（仅 scene=admin 生效） |
+| scene | home | `home`: C端首页模式；`admin`: 控制面板模式 |
+
+scene=home（默认）：每个优先级（high/medium/low）各返回一条，最多 3 条，个性化排序，不分页。
+
+Response (scene=home):
+```json
+{
+  "code": 200,
+  "data": {
+    "content": [
+      { "id": 1, "priority": "high", "title": "...", "summary": "...",
+        "primarySource": "财联社", "credibilityLevel": "authoritative",
+        "credibilityScore": 0.87, "sourceCount": 3, "sentiment": "positive",
+        "sentimentScore": 0.85, "relatedStocks": "NVDA,TSM", "tags": "AI,chip",
+        "latestArticleTime": "2026-03-27T09:15:00", "createdAt": "2026-03-27T09:20:00" },
+      { "id": 5, "priority": "medium", "title": "...", "summary": "...", "..." : "..." },
+      { "id": 12, "priority": "low", "title": "...", "summary": "...", "..." : "..." }
+    ],
+    "totalElements": 3, "totalPages": 1, "currentPage": 0
+  }
+}
+```
+
+scene=admin：返回全量分页数据，个性化排序。
+
+Response (scene=admin):
 ```json
 {
   "code": 200,
@@ -91,9 +123,9 @@ Response:
       "title": "英伟达发布新一代AI芯片B300",
       "summary": "...", "primarySource": "财联社",
       "credibilityLevel": "authoritative", "credibilityScore": 0.87,
-      "sourceCount": 3, "sentiment": "positive",
+      "sourceCount": 3, "sentiment": "positive", "sentimentScore": 0.85,
       "relatedStocks": "NVDA,TSM", "tags": "AI,chip",
-      "latestArticleTime": "2026-03-27T09:15:00"
+      "latestArticleTime": "2026-03-27T09:15:00", "createdAt": "2026-03-27T09:20:00"
     }],
     "totalElements": 56, "totalPages": 3, "currentPage": 0
   }
@@ -203,20 +235,54 @@ Response:
   "data": {
     "investorType": "growth",
     "investmentCycle": "medium",
-    "focusAreas": ["AI", "chip", "robot"],
+    "focusAreas": ["AI", "AI芯片", "量子计算", "我的自定义领域"],
     "holdings": [
-      { "id": 1, "stockCode": "NVDA", "stockName": "英伟达", "sector": "semiconductor" },
-      { "id": 2, "stockCode": "TSM", "stockName": "台积电", "sector": "semiconductor" }
+      { "id": 1, "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
+      { "id": 2, "stockCode": "AMD", "stockName": "Advanced Micro Devices", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
     ]
   }
 }
 ```
 
 说明：
-- focusAreas：字符串数组
-- holdings：对象数组，包含 id/stockCode/stockName/sector
+- focusAreas：字符串数组，支持预设选项和用户自定义文本
+- holdings：对象数组，包含 id/stockCode/stockName/sector/percentage/costPrice
+- percentage 和 costPrice 未填时为 null
 - userId=0 或不传时返回空对象 `{}`
 - `/api/profile/full` 为别名，行为完全一致
+
+### GET /api/profile/focus-options — 获取可选关注领域标签
+
+Params: `?userId=1`（可选，传了会标记用户已选项）
+
+Response:
+```json
+{
+  "code": 200,
+  "data": [
+    { "id": "AI", "name": "AI", "selected": true },
+    { "id": "AI芯片", "name": "AI芯片", "selected": true },
+    { "id": "云计算", "name": "云计算", "selected": false },
+    { "id": "半导体", "name": "半导体", "selected": false },
+    { "id": "大模型", "name": "大模型", "selected": false },
+    { "id": "AIGC应用", "name": "AIGC应用", "selected": false },
+    { "id": "自动驾驶", "name": "自动驾驶", "selected": false },
+    { "id": "机器人", "name": "机器人", "selected": false },
+    { "id": "量子计算", "name": "量子计算", "selected": false },
+    { "id": "生物科技", "name": "生物科技", "selected": false },
+    { "id": "新能源", "name": "新能源", "selected": false },
+    { "id": "金融科技", "name": "金融科技", "selected": false },
+    { "id": "网络安全", "name": "网络安全", "selected": false },
+    { "id": "元宇宙", "name": "元宇宙", "selected": false },
+    { "id": "我的自定义领域", "name": "我的自定义领域", "selected": true }
+  ]
+}
+```
+
+说明：
+- `id` 和 `name` 值相同，都是可读文本（不是生成的 ID）
+- 前端保存 focusAreas 时应使用 `id`（或 `name`）字段的值，而非自行生成 ID
+- 用户自定义的领域（不在预设列表中的）会追加在末尾，`selected: true`
 
 ### PUT /api/profile — 保存画像（含持仓全量替换）
 
@@ -227,23 +293,71 @@ Request:
 {
   "investorType": "growth",
   "investmentCycle": "medium",
-  "focusAreas": ["AI", "chip", "robot"],
+  "focusAreas": ["AI", "AI芯片", "我的自定义领域"],
   "holdings": [
-    { "stockCode": "NVDA", "stockName": "英伟达", "sector": "semiconductor" },
-    { "stockCode": "TSM", "stockName": "台积电", "sector": "semiconductor" }
+    { "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40, "costPrice": 320 },
+    { "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20, "costPrice": 105 }
   ]
 }
 ```
 
 Response:
 ```json
-{ "code": 200, "message": "saved" }
+{
+  "code": 200,
+  "message": "saved",
+  "data": {
+    "investorType": "growth",
+    "investmentCycle": "medium",
+    "focusAreas": ["AI", "AI芯片", "我的自定义领域"],
+    "holdings": [
+      { "id": 1, "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
+      { "id": 2, "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
+    ]
+  }
+}
 ```
 
 说明：
-- focusAreas：接受字符串数组 `["AI","chip"]` 或逗号分隔字符串 `"AI,chip"`
-- holdings：接受对象数组，全量替换（先删后增）；也兼容旧的逗号分隔字符串格式
+- focusAreas：接受字符串数组或逗号分隔字符串，存什么返回什么
+- holdings：接受对象数组，全量替换；percentage/costPrice 为可选字段，支持数字或字符串类型（如 `40` 或 `"40"`）
 - 所有字段均为可选，只更新传入的字段
+- 保存成功后返回完整画像数据（含持仓），前端无需再发 GET 请求
+
+### GET /api/profile/focus-options — 可选关注领域标签列表
+
+Params: `?userId=1`（可选，不传或传 0 则不标记已选状态）
+
+返回预设的 14 个关注领域 + 用户自定义领域（不在预设中的自动追加到末尾）。
+
+Response:
+```json
+{
+  "code": 200,
+  "data": [
+    { "id": "AI", "name": "AI", "selected": true },
+    { "id": "AI芯片", "name": "AI芯片", "selected": true },
+    { "id": "云计算", "name": "云计算", "selected": false },
+    { "id": "半导体", "name": "半导体", "selected": false },
+    { "id": "大模型", "name": "大模型", "selected": false },
+    { "id": "AIGC应用", "name": "AIGC应用", "selected": false },
+    { "id": "自动驾驶", "name": "自动驾驶", "selected": false },
+    { "id": "机器人", "name": "机器人", "selected": false },
+    { "id": "量子计算", "name": "量子计算", "selected": false },
+    { "id": "生物科技", "name": "生物科技", "selected": false },
+    { "id": "新能源", "name": "新能源", "selected": false },
+    { "id": "金融科技", "name": "金融科技", "selected": false },
+    { "id": "网络安全", "name": "网络安全", "selected": false },
+    { "id": "元宇宙", "name": "元宇宙", "selected": false },
+    { "id": "我的自定义领域", "name": "我的自定义领域", "selected": true }
+  ]
+}
+```
+
+说明：
+- 预设 14 个领域：AI, AI芯片, 云计算, 半导体, 大模型, AIGC应用, 自动驾驶, 机器人, 量子计算, 生物科技, 新能源, 金融科技, 网络安全, 元宇宙
+- `selected` 基于用户画像中 focusAreas 字段匹配
+- 用户自定义的领域（不在预设列表中的）追加到数组末尾，`selected` 为 true
 
 ### GET /api/auth/me — 获取用户信息
 
@@ -342,6 +456,14 @@ Response: `{ "code": 200, "data": { "created": 15, "merged": 3 } }`
 
 ## 2. 数据查询
 
+### GET /api/intelligences — 情报列表（控制面板模式）
+
+Params: `?userId=1&hours=72&page=0&size=50&scene=admin`
+
+控制面板使用 `scene=admin` 获取全量分页情报数据（区别于 C 端 `scene=home` 每个优先级只取一条）。
+
+Response 格式同第一部分"情报列表"的 `scene=admin` 响应。
+
 ### GET /api/news — 原始新闻列表
 
 Params: `?hours=24`
@@ -403,8 +525,8 @@ Response:
 {
   "code": 200,
   "data": [
-    { "id": 1, "stockCode": "NVDA", "stockName": "英伟达", "sector": "semiconductor" },
-    { "id": 2, "stockCode": "TSM", "stockName": "台积电", "sector": "semiconductor" }
+    { "id": 1, "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": 40.0, "costPrice": 320.0 },
+    { "id": 2, "stockCode": "AMD", "stockName": "AMD", "sector": "半导体", "percentage": 20.0, "costPrice": 105.0 }
   ]
 }
 ```
@@ -415,13 +537,15 @@ Params: `?userId=1`
 
 Request:
 ```json
-{ "stockCode": "NVDA", "stockName": "英伟达", "sector": "semiconductor" }
+{ "stockCode": "NVDA", "stockName": "英伟达", "sector": "半导体", "percentage": "40", "costPrice": "320" }
 ```
 
 Response:
 ```json
 { "code": 200, "message": "added", "id": 3 }
 ```
+
+说明：sector/percentage/costPrice 均为可选字段
 
 ### DELETE /api/profile/holdings/{id} — 删除单条持仓
 

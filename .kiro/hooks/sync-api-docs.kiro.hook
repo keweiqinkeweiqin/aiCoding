@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Sync API Docs on Controller Change",
+  "description": "When any controller Java file is edited, automatically review the changes and update the API documentation (.kiro/specs/wall-street-eye/api-doc-v5.md) to reflect the new request/response formats, parameters, and endpoints.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "src/main/java/com/example/demo/controller/*.java"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A controller file was just edited. Read the changed controller file and compare it with the current API documentation at .kiro/specs/wall-street-eye/api-doc-v5.md. If there are any differences in endpoints, parameters, request/response formats, or behavior, update the API doc to match the code. Only update sections that actually changed. Do not rewrite the entire doc."
+  }
+}

@@ -90,7 +90,7 @@ async function loadStats() {
     document.getElementById('statVector').textContent = d.vectorCacheSize ?? '-';
     document.getElementById('statMarket').textContent = d.totalMarket ?? '-';
     try {
-      const r2 = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=720&page=0&size=1');
+      const r2 = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=720&page=0&size=1&scene=admin');
       const d2 = await r2.json();
       document.getElementById('statIntel').textContent = d2.data?.totalElements ?? '-';
     } catch (_) {
@@ -252,7 +252,7 @@ async function loadIntelligences() {
   el.innerHTML = '<div class="loading">加载中</div>';
   expandedIntelId = null;
   try {
-    const r = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=72&page=0&size=50');
+    const r = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=72&page=0&size=50&scene=admin');
     const d = await r.json();
     const items = d.data?.content;
     if (!items || !items.length) {

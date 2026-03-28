@@ -86,26 +86,26 @@ public class ProfileController {
             Object h = body.get("holdings");
             if (h instanceof List) {
                 @SuppressWarnings("unchecked")
-                List<Map<String, String>> holdingList = (List<Map<String, String>>) h;
+                List<Map<String, Object>> holdingList = (List<Map<String, Object>>) h;
                 // 删除旧持仓
                 userHoldingRepository.findByUserId(userId).forEach(
                         old -> userHoldingRepository.deleteById(old.getId()));
                 // 写入新持仓
                 List<String> codes = new ArrayList<>();
-                for (Map<String, String> item : holdingList) {
-                    String code = item.getOrDefault("stockCode", "").trim().toUpperCase();
-                    String name = item.getOrDefault("stockName", "").trim();
+                for (Map<String, Object> item : holdingList) {
+                    String code = String.valueOf(item.getOrDefault("stockCode", "")).trim().toUpperCase();
+                    String name = String.valueOf(item.getOrDefault("stockName", "")).trim();
                     if (code.isEmpty()) continue;
                     UserHolding uh = new UserHolding();
                     uh.setUserId(userId);
                     uh.setStockCode(code);
                     uh.setStockName(name);
-                    uh.setSector(item.getOrDefault("sector", ""));
+                    uh.setSector(String.valueOf(item.getOrDefault("sector", "")));
                     if (item.containsKey("percentage")) {
-                        try { uh.setPercentage(Double.parseDouble(item.get("percentage"))); } catch (Exception ignored) {}
+                        try { uh.setPercentage(Double.parseDouble(String.valueOf(item.get("percentage")))); } catch (Exception ignored) {}
                     }
                     if (item.containsKey("costPrice")) {
-                        try { uh.setCostPrice(Double.parseDouble(item.get("costPrice"))); } catch (Exception ignored) {}
+                        try { uh.setCostPrice(Double.parseDouble(String.valueOf(item.get("costPrice")))); } catch (Exception ignored) {}
                     }
                     userHoldingRepository.save(uh);
                     codes.add(code);
@@ -119,7 +119,67 @@ public class ProfileController {
         }
 
         userProfileRepository.save(profile);
-        return ResponseEntity.ok(Map.of("code", 200, "message", "saved"));
+
+        // 返回保存后的完整画像（含持仓），前端无需再发一次 GET
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("investorType", profile.getInvestorType());
+        data.put("investmentCycle", profile.getInvestmentCycle());
+        data.put("focusAreas", splitToList(profile.getFocusAreas()));
+        data.put("holdings", buildHoldingsList(userId));
+        return ResponseEntity.ok(Map.of("code", 200, "message", "saved", "data", data));
+    }
+
+    /**
+     * GET /api/profile/focus-options?userId=1
+     * 返回可选关注领域标签列表，含用户已选状态
+     */
+    @GetMapping("/focus-options")
+    public ResponseEntity<Map<String, Object>> getFocusOptions(
+            @RequestParam(defaultValue = "0") Long userId) {
+        // 预设领域列表
+        List<String[]> presets = List.of(
+                new String[]{"AI", "AI"},
+                new String[]{"AI芯片", "AI芯片"},
+                new String[]{"云计算", "云计算"},
+                new String[]{"半导体", "半导体"},
+                new String[]{"大模型", "大模型"},
+                new String[]{"AIGC应用", "AIGC应用"},
+                new String[]{"自动驾驶", "自动驾驶"},
+                new String[]{"机器人", "机器人"},
+                new String[]{"量子计算", "量子计算"},
+                new String[]{"生物科技", "生物科技"},
+                new String[]{"新能源", "新能源"},
+                new String[]{"金融科技", "金融科技"},
+                new String[]{"网络安全", "网络安全"},
+                new String[]{"元宇宙", "元宇宙"}
+        );
+
+        Set<String> selected = new LinkedHashSet<>();
+        if (userId > 0) {
+            var profile = userProfileRepository.findByUserId(userId).orElse(null);
+            if (profile != null && profile.getFocusAreas() != null) {
+                for (String s : profile.getFocusAreas().split(",")) {
+                    String trimmed = s.trim();
+                    if (!trimmed.isEmpty()) selected.add(trimmed);
+                }
+            }
+        }
+
+        // 构建结果：预设 + 用户自定义（不在预设中的）
+        Set<String> presetNames = new LinkedHashSet<>();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (String[] p : presets) {
+            presetNames.add(p[0]);
+            result.add(Map.of("id", p[0], "name", p[1], "selected", selected.contains(p[0])));
+        }
+        // 用户自定义的领域追加到末尾
+        for (String s : selected) {
+            if (!presetNames.contains(s)) {
+                result.add(Map.of("id", s, "name", s, "selected", true));
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("code", 200, "data", result));
     }
 
     /**

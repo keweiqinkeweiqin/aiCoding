@@ -96,8 +96,8 @@ let state = {investorType:null,investmentCycle:null,focusAreas:[],holdings:[],fo
 async function init(){
   try{
     const [pRes,oRes] = await Promise.all([
-      fetch('/api/profile',{headers:HEADERS}),
-      fetch('/api/profile/focus-options',{headers:HEADERS})
+      fetch('/api/profile?userId='+USER_ID,{headers:HEADERS}),
+      fetch('/api/profile/focus-options?userId='+USER_ID,{headers:HEADERS})
     ]);
     if(pRes.status===401||oRes.status===401){window.location.href='/login.html';return;}
     const pd = await pRes.json(), od = await oRes.json();
@@ -187,7 +187,7 @@ async function confirmAddHolding(){
   var cost=document.getElementById('inputCost').value;
   if(!code){showToast('请输入股票代码',true);return;}
   try{
-    var res=await fetch('/api/profile/holdings',{method:'POST',headers:HEADERS,body:JSON.stringify({stockCode:code,stockName:name||code,positionRatio:ratio?parseFloat(ratio):null,costPrice:cost?parseFloat(cost):null})});
+    var res=await fetch('/api/profile/holdings?userId='+USER_ID,{method:'POST',headers:HEADERS,body:JSON.stringify({stockCode:code,stockName:name||code,positionRatio:ratio?parseFloat(ratio):null,costPrice:cost?parseFloat(cost):null})});
     if(!res.ok){var d=await res.json();showToast(d.message||'添加失败',true);return;}
     var newH={stockCode:code,stockName:name||code,positionRatio:ratio?parseFloat(ratio):null,costPrice:cost?parseFloat(cost):null};
     var idx=state.holdings.findIndex(function(h){return h.stockCode===code;});
@@ -209,7 +209,7 @@ async function saveProfile(){
   var btn=document.getElementById('saveBtn');
   btn.disabled=true;btn.textContent='保存中...';
   try{
-    var res=await fetch('/api/profile',{method:'PUT',headers:HEADERS,body:JSON.stringify({investorType:state.investorType,investmentCycle:state.investmentCycle,focusAreas:state.focusAreas})});
+    var res=await fetch('/api/profile?userId='+USER_ID,{method:'PUT',headers:HEADERS,body:JSON.stringify({investorType:state.investorType,investmentCycle:state.investmentCycle,focusAreas:state.focusAreas})});
     if(!res.ok){var d=await res.json();showToast(d.message||'保存失败',true);return;}
     showToast('画像保存成功');
     setTimeout(function(){window.location.href='/index.html';},800);

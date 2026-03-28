@@ -39,59 +39,92 @@ public class IntelligenceController {
         this.analysisService = analysisService;
     }
 
-    /** Intelligence list with personalized sorting based on user profile */
+    /**
+     * Intelligence list.
+     * scene=home (default): C端首页，每个优先级(high/medium/low)各返回一条，个性化排序
+     * scene=admin: 控制面板，返回全量分页数据
+     */
     @GetMapping
     public ResponseEntity<Map<String, Object>> list(
             @RequestParam(defaultValue = "24") int hours,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "1") Long userId) {
+            @RequestParam(defaultValue = "1") Long userId,
+            @RequestParam(defaultValue = "home") String scene) {
 
-        Page<Intelligence> result = intelligenceService.listIntelligences(hours, page, size);
-        List<Intelligence> items = new java.util.ArrayList<>(result.getContent());
+        if ("admin".equals(scene)) {
+            return listAdmin(hours, page, size, userId);
+        }
+        return listHome(hours, userId);
+    }
 
-        // Load user profile for personalized sorting
-        String focusAreas = null;
-        String holdings = null;
+    /** C端首页：每个优先级各取一条，个性化排序 */
+    private ResponseEntity<Map<String, Object>> listHome(int hours, Long userId) {
+        var all = intelligenceRepository
+                .findByCreatedAtAfterOrderByLatestArticleTimeDesc(
+                        java.time.LocalDateTime.now().minusHours(hours));
+
+        // 每个优先级取一条
+        List<Intelligence> picked = new ArrayList<>();
+        for (String p : List.of("high", "medium", "low")) {
+            all.stream().filter(i -> p.equals(i.getPriority())).findFirst()
+                    .ifPresent(picked::add);
+        }
+
+        // 个性化排序
         UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
         if (profile != null) {
-            focusAreas = profile.getFocusAreas();
-            holdings = profile.getHoldings();
+            String fa = profile.getFocusAreas();
+            String h = profile.getHoldings();
+            if ((fa != null && !fa.isBlank()) || (h != null && !h.isBlank())) {
+                Set<String> areas = fa != null ? Set.of(fa.toLowerCase().split(",")) : Set.of();
+                Set<String> stocks = h != null ? Set.of(h.toUpperCase().split(",")) : Set.of();
+                picked.sort((a, b) -> {
+                    int diff = Integer.compare(calcRelevance(b, areas, stocks), calcRelevance(a, areas, stocks));
+                    if (diff != 0) return diff;
+                    if (a.getLatestArticleTime() != null && b.getLatestArticleTime() != null)
+                        return b.getLatestArticleTime().compareTo(a.getLatestArticleTime());
+                    return 0;
+                });
+            }
         }
 
-        // Personalized sorting
-        if ((focusAreas != null && !focusAreas.isBlank()) || (holdings != null && !holdings.isBlank())) {
-            Set<String> areas = focusAreas != null ? Set.of(focusAreas.toLowerCase().split(",")) : Set.of();
-            Set<String> stocks = holdings != null ? Set.of(holdings.toUpperCase().split(",")) : Set.of();
-            items.sort((a, b) -> {
-                int scoreA = calcRelevance(a, areas, stocks);
-                int scoreB = calcRelevance(b, areas, stocks);
-                if (scoreA != scoreB) return Integer.compare(scoreB, scoreA);
-                if (a.getLatestArticleTime() != null && b.getLatestArticleTime() != null)
-                    return b.getLatestArticleTime().compareTo(a.getLatestArticleTime());
-                return 0;
-            });
+        var content = picked.stream().map(this::toListItem).toList();
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of(
+                        "content", content,
+                        "totalElements", content.size(),
+                        "totalPages", 1,
+                        "currentPage", 0
+                )
+        ));
+    }
+
+    /** 控制面板：全量分页 */
+    private ResponseEntity<Map<String, Object>> listAdmin(int hours, int page, int size, Long userId) {
+        Page<Intelligence> result = intelligenceService.listIntelligences(hours, page, size);
+        List<Intelligence> items = new ArrayList<>(result.getContent());
+
+        // 个性化排序
+        UserProfile profile = userProfileRepository.findByUserId(userId).orElse(null);
+        if (profile != null) {
+            String fa = profile.getFocusAreas();
+            String h = profile.getHoldings();
+            if ((fa != null && !fa.isBlank()) || (h != null && !h.isBlank())) {
+                Set<String> areas = fa != null ? Set.of(fa.toLowerCase().split(",")) : Set.of();
+                Set<String> stocks = h != null ? Set.of(h.toUpperCase().split(",")) : Set.of();
+                items.sort((a, b) -> {
+                    int diff = Integer.compare(calcRelevance(b, areas, stocks), calcRelevance(a, areas, stocks));
+                    if (diff != 0) return diff;
+                    if (a.getLatestArticleTime() != null && b.getLatestArticleTime() != null)
+                        return b.getLatestArticleTime().compareTo(a.getLatestArticleTime());
+                    return 0;
+                });
+            }
         }
 
-        var content = items.stream().map(intel -> {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", intel.getId());
-            item.put("priority", intel.getPriority());
-            item.put("title", intel.getTitle());
-            item.put("summary", intel.getSummary());
-            item.put("primarySource", intel.getPrimarySource());
-            item.put("credibilityLevel", intel.getCredibilityLevel());
-            item.put("credibilityScore", intel.getCredibilityScore());
-            item.put("sourceCount", intel.getSourceCount());
-            item.put("sentiment", intel.getSentiment());
-            item.put("sentimentScore", intel.getSentimentScore());
-            item.put("relatedStocks", intel.getRelatedStocks());
-            item.put("tags", intel.getTags());
-            item.put("latestArticleTime", intel.getLatestArticleTime());
-            item.put("createdAt", intel.getCreatedAt());
-            return item;
-        }).toList();
-
+        var content = items.stream().map(this::toListItem).toList();
         return ResponseEntity.ok(Map.of(
                 "code", 200,
                 "data", Map.of(
@@ -101,6 +134,25 @@ public class IntelligenceController {
                         "currentPage", result.getNumber()
                 )
         ));
+    }
+
+    private Map<String, Object> toListItem(Intelligence intel) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", intel.getId());
+        item.put("priority", intel.getPriority());
+        item.put("title", intel.getTitle());
+        item.put("summary", intel.getSummary());
+        item.put("primarySource", intel.getPrimarySource());
+        item.put("credibilityLevel", intel.getCredibilityLevel());
+        item.put("credibilityScore", intel.getCredibilityScore());
+        item.put("sourceCount", intel.getSourceCount());
+        item.put("sentiment", intel.getSentiment());
+        item.put("sentimentScore", intel.getSentimentScore());
+        item.put("relatedStocks", intel.getRelatedStocks());
+        item.put("tags", intel.getTags());
+        item.put("latestArticleTime", intel.getLatestArticleTime());
+        item.put("createdAt", intel.getCreatedAt());
+        return item;
     }
 
     /** 情报详情（含个性化分析） */
