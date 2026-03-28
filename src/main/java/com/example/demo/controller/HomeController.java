@@ -23,6 +23,32 @@ public class HomeController {
     private final IntelligenceRepository intelligenceRepository;
     private final MarketDataRepository marketDataRepository;
 
+    // 常见英文标签 → 中文映射（兼容历史数据）
+    private static final Map<String, String> TAG_CN_MAP = Map.ofEntries(
+            Map.entry("chip", "芯片"), Map.entry("Chip", "芯片"),
+            Map.entry("semiconductor", "半导体"), Map.entry("Semiconductor", "半导体"),
+            Map.entry("robot", "机器人"), Map.entry("Robot", "机器人"),
+            Map.entry("cloud", "云计算"), Map.entry("Cloud", "云计算"),
+            Map.entry("autonomous driving", "自动驾驶"),
+            Map.entry("EV", "新能源车"), Map.entry("ev", "新能源车"),
+            Map.entry("battery", "电池"), Map.entry("Battery", "电池"),
+            Map.entry("quantum", "量子计算"), Map.entry("Quantum", "量子计算"),
+            Map.entry("biotech", "生物科技"), Map.entry("Biotech", "生物科技"),
+            Map.entry("fintech", "金融科技"), Map.entry("Fintech", "金融科技"),
+            Map.entry("cybersecurity", "网络安全"),
+            Map.entry("metaverse", "元宇宙"), Map.entry("Metaverse", "元宇宙"),
+            Map.entry("GPU", "GPU"), Map.entry("LLM", "大模型"),
+            Map.entry("large model", "大模型"),
+            Map.entry("data center", "数据中心"),
+            Map.entry("trade", "贸易"), Map.entry("tariff", "关税"),
+            Map.entry("regulation", "监管"), Map.entry("IPO", "IPO"),
+            Map.entry("earnings", "财报"), Map.entry("merger", "并购")
+    );
+
+    private static String translateTag(String tag) {
+        return TAG_CN_MAP.getOrDefault(tag, tag);
+    }
+
     public HomeController(UserRepository userRepository,
                           UserProfileRepository userProfileRepository,
                           IntelligenceRepository intelligenceRepository,
@@ -150,12 +176,12 @@ public class HomeController {
             overview.put("avgChangePercent", 0);
         }
 
-        // Top tags from recent intelligences
+        // Top tags from recent intelligences (translate English tags to Chinese)
         Map<String, Integer> tagCounts = new LinkedHashMap<>();
         for (Intelligence intel : recent) {
             if (intel.getTags() != null) {
                 for (String tag : intel.getTags().split(",")) {
-                    tag = tag.trim();
+                    tag = translateTag(tag.trim());
                     if (!tag.isEmpty()) tagCounts.merge(tag, 1, Integer::sum);
                 }
             }

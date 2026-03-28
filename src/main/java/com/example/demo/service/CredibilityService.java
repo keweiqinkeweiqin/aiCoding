@@ -83,8 +83,12 @@ public class CredibilityService {
     /** 维度2: LLM情感分析置信度 (0-1) — sentimentScore越极端说明LLM越确定 */
     private double assessLlmConfidence(NewsArticle article) {
         if (article.getSentimentScore() == null) return 0.5;
+        double raw = article.getSentimentScore();
+        // 有些 LLM 返回 0-100 而非 0-1，归一化处理
+        if (raw > 1.0) raw = raw / 100.0;
+        raw = Math.max(0.0, Math.min(1.0, raw));
         // sentimentScore 0.0-1.0, 越接近0或1说明LLM越确定
-        double deviation = Math.abs(article.getSentimentScore() - 0.5);
+        double deviation = Math.abs(raw - 0.5);
         return 0.5 + deviation; // 范围 0.5-1.0
     }
 

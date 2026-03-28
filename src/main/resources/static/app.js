@@ -1161,12 +1161,13 @@ async function deleteHolding(holdingId) {
 
 function initQueryPanel() {
   document.getElementById('panel-query').innerHTML = `
-    <div class="section-title">🤖 智能问答 <span style="font-size:12px;color:#8890b5;font-weight:400">语义检索 + LLM流式推理</span></div>
+    <div class="section-title">🤖 智能问答 <span style="font-size:12px;color:#8890b5;font-weight:400">语义检索 + LLM流式推理 · 支持多轮对话</span></div>
     <div style="display:flex;gap:10px;margin-bottom:16px">
       <input id="queryInput" type="text" class="input" placeholder="输入问题，如：英伟达最近有什么利好消息？"
         onkeydown="if(event.key==='Enter')doQuery()" style="flex:1">
       <button onclick="doQuery()" id="queryBtn" class="btn btn-purple">🔍 分析</button>
       <button onclick="abortQuery()" id="queryAbortBtn" class="btn btn-ghost" style="display:none">⏹ 停止</button>
+      <button onclick="clearChat()" id="clearChatBtn" class="btn btn-ghost" style="display:none">🗑️ 新对话</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="setQuery('AI芯片行业最近有什么重大变化？')" class="qbtn">AI芯片动态</button>
@@ -1174,8 +1175,16 @@ function initQueryPanel() {
       <button onclick="setQuery('科技股最近走势如何？有什么投资机会？')" class="qbtn">科技股分析</button>
       <button onclick="setQuery('最近有哪些利空消息需要注意？')" class="qbtn">风险提示</button>
     </div>
+    <div id="chatHistoryDisplay"></div>
     <div id="queryResult" style="min-height:200px"></div>
   `;
+}
+
+function clearChat() {
+  chatHistory = [];
+  document.getElementById('chatHistoryDisplay').innerHTML = '';
+  document.getElementById('queryResult').innerHTML = '';
+  document.getElementById('clearChatBtn').style.display = 'none';
 }
 
 /** 将 LLM 纯文本转为带格式的 HTML */
@@ -1203,6 +1212,7 @@ function formatLlmAnswer(text) {
 function setQuery(q) { document.getElementById('queryInput').value = q; }
 
 let currentQuerySource = null;
+let chatHistory = []; // Multi-turn conversation history
 
 function abortQuery() {
   if (currentQuerySource) {
@@ -1223,14 +1233,29 @@ async function doQuery() {
   const result = document.getElementById('queryResult');
   const btn = document.getElementById('queryBtn');
   const abortBtn = document.getElementById('queryAbortBtn');
+  const clearBtn = document.getElementById('clearChatBtn');
   btn.disabled = true;
   btn.textContent = '⏳ 检索中...';
   abortBtn.style.display = '';
+  clearBtn.style.display = '';
 
-  // Render skeleton
+  // Append user message to chat history display
+  const historyEl = document.getElementById('chatHistoryDisplay');
+  if (chatHistory.length > 0) {
+    // Move previous result into history display
+    const prevResult = result.innerHTML;
+    if (prevResult) {
+      historyEl.innerHTML += prevResult;
+    }
+  }
+
+  // Render current question bubble
   result.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <div style="background:#7c3aed;color:#fff;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:80%;font-size:14px">${esc(q)}</div>
+    </div>
     <div id="queryMeta" style="margin-bottom:12px">
-      <div class="loading">正在语义检索相关新闻...</div>
+      <div class="loading">正在语义检索相关情报...</div>
     </div>
     <div id="queryThinkingBlock" style="display:none;margin-bottom:12px">
       <details id="queryThinkingDetails" open>
@@ -1250,126 +1275,142 @@ async function doQuery() {
     <div id="queryRelatedNews"></div>
   `;
 
-  const url = API + '/api/query/stream?question=' + encodeURIComponent(q);
-  const eventSource = new EventSource(url);
-  currentQuerySource = eventSource;
+  // Use POST /api/chat/stream with history
+  const fetchBody = JSON.stringify({ question: q, history: chatHistory });
+  const response = await fetch(API + '/api/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+    body: fetchBody
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
   let answerText = '';
   let reasoningText = '';
   let firstToken = true;
   let firstReasoning = true;
   let matchedCount = 0;
+  let buffer = '';
 
-  eventSource.addEventListener('meta', function(e) {
-    try {
-      const meta = JSON.parse(e.data);
-      matchedCount = meta.matchedCount || 0;
-      const metaEl = document.getElementById('queryMeta');
-      metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px">
-        <span style="font-size:14px">🔍</span>
-        <span style="font-size:13px;color:#c4b5fd">语义匹配到 <b style="color:#ffd700">${meta.matchedCount}</b> 条相关情报，正在生成分析...</span>
-      </div>`;
-      btn.textContent = '⏳ 生成中...';
-
-      // Render related news as collapsible cards
-      if (meta.relatedNews && meta.relatedNews.length) {
-        const newsEl = document.getElementById('queryRelatedNews');
-        let html = `<details style="margin-top:4px">
-          <summary style="font-size:13px;color:#8890b5;cursor:pointer;padding:8px 0;user-select:none;display:flex;align-items:center;gap:6px">
-            <span>📎</span> 参考情报来源 (${meta.relatedNews.length}条聚合情报)
-          </summary>
-          <div style="display:grid;gap:6px;padding:8px 0">`;
-        meta.relatedNews.forEach(function(n) {
-          const credColor = n.credibilityLevel === 'authoritative' ? '#065f46' : n.credibilityLevel === 'normal' ? '#92400e' : '#6b7280';
-          const srcCount = n.sourceCount > 1 ? ' · ' + n.sourceCount + '源' : '';
-          const relevance = n.relevance ? n.relevance + '%' : '';
-          html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#0d1235;border:1px solid #1e2555;border-radius:8px">
-            <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${credColor};color:#fff;white-space:nowrap">${esc(n.credibilityLevel || '')}</span>
-            <span style="font-size:12px;color:#8890b5;white-space:nowrap">${esc(n.sourceName)}${srcCount}</span>
-            <span style="font-size:12px;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.title)}</span>
-            ${relevance ? '<span style="font-size:11px;color:#fbbf24;white-space:nowrap">' + relevance + '</span>' : ''}
-            ${n.sourceUrl ? '<a href="' + esc(n.sourceUrl) + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:11px;white-space:nowrap">原文↗</a>' : ''}
-          </div>`;
-        });
-        html += '</div></details>';
-        newsEl.innerHTML = html;
-      }
-    } catch (err) { console.warn('meta parse error', err); }
-  });
-
-  eventSource.addEventListener('reasoning', function(e) {
-    const block = document.getElementById('queryThinkingBlock');
-    if (firstReasoning) {
-      block.style.display = 'block';
-      btn.textContent = '⏳ 思考中...';
-      firstReasoning = false;
+  function processLine(line) {
+    if (!line.startsWith('event:') && !line.startsWith('data:')) return;
+    // Parse SSE manually
+    if (line.startsWith('event:')) {
+      buffer = line.substring(6).trim();
+      return;
     }
-    reasoningText += e.data;
-    const textEl = document.getElementById('queryThinkingText');
-    textEl.textContent = reasoningText;
-    textEl.scrollTop = textEl.scrollHeight;
-  });
+    if (line.startsWith('data:')) {
+      const data = line.substring(5).trim();
+      const eventName = buffer || 'message';
+      buffer = '';
+      handleEvent(eventName, data);
+    }
+  }
 
-  eventSource.addEventListener('token', function(e) {
-    if (firstToken) {
-      document.getElementById('queryAnswerText').innerHTML = '';
-      // Collapse thinking when answer starts
+  function handleEvent(name, data) {
+    if (name === 'meta') {
+      try {
+        const meta = JSON.parse(data);
+        matchedCount = meta.matchedCount || 0;
+        const metaEl = document.getElementById('queryMeta');
+        metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px">
+          <span style="font-size:14px">🔍</span>
+          <span style="font-size:13px;color:#c4b5fd">语义匹配到 <b style="color:#ffd700">${meta.matchedCount}</b> 条相关情报，正在生成分析...</span>
+        </div>`;
+        btn.textContent = '⏳ 生成中...';
+        if (meta.relatedNews && meta.relatedNews.length) {
+          const newsEl = document.getElementById('queryRelatedNews');
+          let html = `<details style="margin-top:4px">
+            <summary style="font-size:13px;color:#8890b5;cursor:pointer;padding:8px 0;user-select:none;display:flex;align-items:center;gap:6px">
+              <span>📎</span> 参考情报来源 (${meta.relatedNews.length}条聚合情报)
+            </summary><div style="display:grid;gap:6px;padding:8px 0">`;
+          meta.relatedNews.forEach(function(n) {
+            const credColor = n.credibilityLevel === 'authoritative' ? '#065f46' : n.credibilityLevel === 'normal' ? '#92400e' : '#6b7280';
+            const srcCount = n.sourceCount > 1 ? ' · ' + n.sourceCount + '源' : '';
+            const relevance = n.relevance ? n.relevance + '%' : '';
+            html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#0d1235;border:1px solid #1e2555;border-radius:8px">
+              <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${credColor};color:#fff;white-space:nowrap">${esc(n.credibilityLevel || '')}</span>
+              <span style="font-size:12px;color:#8890b5;white-space:nowrap">${esc(n.sourceName)}${srcCount}</span>
+              <span style="font-size:12px;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.title)}</span>
+              ${relevance ? '<span style="font-size:11px;color:#fbbf24;white-space:nowrap">' + relevance + '</span>' : ''}
+            </div>`;
+          });
+          html += '</div></details>';
+          newsEl.innerHTML = html;
+        }
+      } catch (err) { console.warn('meta parse error', err); }
+    } else if (name === 'reasoning') {
+      const block = document.getElementById('queryThinkingBlock');
+      if (firstReasoning) { block.style.display = 'block'; btn.textContent = '⏳ 思考中...'; firstReasoning = false; }
+      reasoningText += data;
+      const textEl = document.getElementById('queryThinkingText');
+      textEl.textContent = reasoningText;
+      textEl.scrollTop = textEl.scrollHeight;
+    } else if (name === 'token') {
+      if (firstToken) {
+        document.getElementById('queryAnswerText').innerHTML = '';
+        if (!firstReasoning) {
+          const details = document.getElementById('queryThinkingDetails');
+          if (details) details.removeAttribute('open');
+          document.getElementById('queryThinkingLabel').textContent = '思考过程（点击展开）';
+        }
+        btn.textContent = '⏳ 输出中...';
+        firstToken = false;
+      }
+      answerText += data;
+      document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText) + '<span style="display:inline-block;width:2px;height:14px;background:#7c3aed;margin-left:2px;vertical-align:middle;animation:blink 1s step-end infinite"></span>';
+    } else if (name === 'done') {
+      // Final render
+      document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText);
+      document.getElementById('queryAnswerLabel').textContent = 'AI 分析结果（基于 ' + matchedCount + ' 条情报）';
       if (!firstReasoning) {
-        const details = document.getElementById('queryThinkingDetails');
-        if (details) details.removeAttribute('open');
-        document.getElementById('queryThinkingLabel').textContent = '思考过程（点击展开）';
+        document.getElementById('queryThinkingLabel').textContent = '思考过程（' + reasoningText.length + '字）';
       }
-      btn.textContent = '⏳ 输出中...';
-      firstToken = false;
+      const metaEl = document.getElementById('queryMeta');
+      if (metaEl) {
+        metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px">
+          <span style="font-size:14px">✅</span>
+          <span style="font-size:13px;color:#4ade80">分析完成，基于 <b style="color:#ffd700">${matchedCount}</b> 条情报生成</span>
+        </div>`;
+      }
+      // Save to chat history for multi-turn
+      chatHistory.push({ role: 'user', content: q });
+      chatHistory.push({ role: 'assistant', content: answerText });
+      // Keep last 5 rounds
+      if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
+    } else if (name === 'error') {
+      if (!answerText) {
+        document.getElementById('queryAnswerText').innerHTML = '<span style="color:#ef4444">查询失败: ' + esc(data) + '</span>';
+      }
     }
-    answerText += e.data;
-    document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText) + '<span style="display:inline-block;width:2px;height:14px;background:#7c3aed;margin-left:2px;vertical-align:middle;animation:blink 1s step-end infinite"></span>';
-  });
+  }
 
-  eventSource.addEventListener('done', function() {
-    eventSource.close();
-    currentQuerySource = null;
-    btn.disabled = false;
-    btn.textContent = '🔍 分析';
-    abortBtn.style.display = 'none';
-    // Final render without cursor
-    document.getElementById('queryAnswerText').innerHTML = formatLlmAnswer(answerText);
-    document.getElementById('queryAnswerLabel').textContent = 'AI 分析结果（基于 ' + matchedCount + ' 条情报）';
-    // Finalize thinking block label
-    if (!firstReasoning) {
-      document.getElementById('queryThinkingLabel').textContent = '思考过程（' + reasoningText.length + '字）';
+  // Read SSE stream via fetch
+  let sseBuffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop(); // keep incomplete line
+      for (const line of lines) {
+        if (line.trim()) processLine(line.trim());
+      }
     }
-    // Update meta bar
-    const metaEl = document.getElementById('queryMeta');
-    if (metaEl) {
-      metaEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px">
-        <span style="font-size:14px">✅</span>
-        <span style="font-size:13px;color:#4ade80">分析完成，基于 <b style="color:#ffd700">${matchedCount}</b> 条情报生成</span>
-      </div>`;
-    }
-  });
-
-  eventSource.addEventListener('error', function(e) {
-    eventSource.close();
-    currentQuerySource = null;
-    btn.disabled = false;
-    btn.textContent = '🔍 分析';
-    abortBtn.style.display = 'none';
-    if (!answerText) {
-      document.getElementById('queryAnswerText').innerHTML = '<span style="color:#ef4444">查询失败，请重试</span>';
-    }
-  });
-
-  eventSource.onerror = function() {
-    // EventSource auto-reconnects; we close on first error to avoid loops
-    eventSource.close();
-    currentQuerySource = null;
-    btn.disabled = false;
-    btn.textContent = '🔍 分析';
-    abortBtn.style.display = 'none';
+    // Process remaining
+    if (sseBuffer.trim()) processLine(sseBuffer.trim());
+  } catch (e) {
     if (!answerText) {
       document.getElementById('queryAnswerText').innerHTML = '<span style="color:#ef4444">连接中断，请重试</span>';
     }
-  };
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 分析';
+  abortBtn.style.display = 'none';
+  input.value = '';
+  currentQuerySource = null;
 }
 
 // ============================================================

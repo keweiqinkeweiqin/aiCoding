@@ -102,7 +102,9 @@ public class EventClusterService {
                 try {
                     Intelligence intel = createFromArticle(article, titleHash);
                     intelligenceRepository.save(intel);
-                    float[] vec = getArticleEmbedding(article);
+                    // 用情报的结构化字段生成向量（标题+摘要+标签+股票），而非仅用文章标题
+                    String embText = buildEmbeddingText(intel);
+                    float[] vec = embeddingClient.embed(embText);
                     if (vec != null && vec.length > 0) {
                         intelEmbeddingCache.put(intel.getId(), vec);
                         try {
@@ -224,8 +226,9 @@ public class EventClusterService {
             } catch (Exception ignored) {}
         }
 
-        // Generate and cache
-        float[] vec = embeddingClient.embed(intel.getTitle());
+        // Generate from structured fields and cache
+        String embText = buildEmbeddingText(intel);
+        float[] vec = embeddingClient.embed(embText);
         if (vec != null && vec.length > 0) {
             intelEmbeddingCache.put(intel.getId(), vec);
         }
@@ -343,6 +346,9 @@ public class EventClusterService {
         }
 
         intelligenceRepository.save(intel);
+
+        // 元数据更新后，用最新的结构化字段重新生成向量
+        refreshIntelEmbedding(intel);
     }
 
     private String mergeField(List<NewsArticle> articles,
@@ -357,6 +363,48 @@ public class EventClusterService {
                 .collect(Collectors.joining(","));
         // Truncate to 1900 chars to stay within column limit
         return result.length() > 1900 ? result.substring(0, 1900) : result;
+    }
+
+    /**
+     * 构建用于 Embedding 的结构化文本：标题 + 摘要 + 标签 + 关联股票
+     * 比纯标题语义覆盖面更广，聚类匹配更准
+     */
+    private String buildEmbeddingText(Intelligence intel) {
+        StringBuilder sb = new StringBuilder();
+        if (intel.getTitle() != null) sb.append(intel.getTitle());
+        if (intel.getSummary() != null && !intel.getSummary().isBlank()) {
+            sb.append(" ").append(intel.getSummary());
+        }
+        if (intel.getTags() != null && !intel.getTags().isBlank()) {
+            sb.append(" 标签:").append(intel.getTags());
+        }
+        if (intel.getRelatedStocks() != null && !intel.getRelatedStocks().isBlank()) {
+            sb.append(" 股票:").append(intel.getRelatedStocks());
+        }
+        String text = sb.toString().trim();
+        // Embedding 模型一般有 token 限制，截断到 500 字
+        return text.length() > 500 ? text.substring(0, 500) : text;
+    }
+
+    /**
+     * 用情报的结构化字段重新生成向量，更新缓存和 DB
+     */
+    private void refreshIntelEmbedding(Intelligence intel) {
+        try {
+            String text = buildEmbeddingText(intel);
+            float[] vec = embeddingClient.embed(text);
+            if (vec != null && vec.length > 0) {
+                intelEmbeddingCache.put(intel.getId(), vec);
+                com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                List<Float> fl = new ArrayList<>();
+                for (float v : vec) fl.add(v);
+                intel.setEmbeddingJson(om.writeValueAsString(fl));
+                intelligenceRepository.save(intel);
+                log.debug("情报向量已刷新: id={}, textLen={}", intel.getId(), text.length());
+            }
+        } catch (Exception e) {
+            log.warn("情报向量刷新失败 {}: {}", intel.getId(), e.getMessage());
+        }
     }
 
     static String computePriority(Double credibilityScore, int sourceCount) {

@@ -21,6 +21,32 @@ public class InsightController {
     private final MarketDataRepository marketDataRepository;
     private final NewsArticleRepository newsArticleRepository;
 
+    // 常见英文标签 → 中文映射（兼容历史数据）
+    private static final Map<String, String> TAG_CN_MAP = Map.ofEntries(
+            Map.entry("chip", "芯片"), Map.entry("Chip", "芯片"),
+            Map.entry("semiconductor", "半导体"), Map.entry("Semiconductor", "半导体"),
+            Map.entry("robot", "机器人"), Map.entry("Robot", "机器人"),
+            Map.entry("cloud", "云计算"), Map.entry("Cloud", "云计算"),
+            Map.entry("autonomous driving", "自动驾驶"),
+            Map.entry("EV", "新能源车"), Map.entry("ev", "新能源车"),
+            Map.entry("battery", "电池"), Map.entry("Battery", "电池"),
+            Map.entry("quantum", "量子计算"), Map.entry("Quantum", "量子计算"),
+            Map.entry("biotech", "生物科技"), Map.entry("Biotech", "生物科技"),
+            Map.entry("fintech", "金融科技"), Map.entry("Fintech", "金融科技"),
+            Map.entry("cybersecurity", "网络安全"),
+            Map.entry("metaverse", "元宇宙"), Map.entry("Metaverse", "元宇宙"),
+            Map.entry("GPU", "GPU"), Map.entry("LLM", "大模型"),
+            Map.entry("large model", "大模型"),
+            Map.entry("data center", "数据中心"),
+            Map.entry("trade", "贸易"), Map.entry("tariff", "关税"),
+            Map.entry("regulation", "监管"), Map.entry("IPO", "IPO"),
+            Map.entry("earnings", "财报"), Map.entry("merger", "并购")
+    );
+
+    private static String translateTag(String tag) {
+        return TAG_CN_MAP.getOrDefault(tag, tag);
+    }
+
     public InsightController(IntelligenceRepository intelligenceRepository,
                              MarketDataRepository marketDataRepository,
                              NewsArticleRepository newsArticleRepository) {
@@ -55,11 +81,9 @@ public class InsightController {
 
         int sentimentIndex = total > 0 ? (int) Math.round((double) pos / total * 100) : 50;
         String sentimentLabel;
-        if (sentimentIndex >= 75) sentimentLabel = "Extreme Greed";
-        else if (sentimentIndex >= 55) sentimentLabel = "Greed";
-        else if (sentimentIndex >= 45) sentimentLabel = "Neutral";
-        else if (sentimentIndex >= 25) sentimentLabel = "Fear";
-        else sentimentLabel = "Extreme Fear";
+        if (sentimentIndex >= 70) sentimentLabel = "偏多";
+        else if (sentimentIndex >= 40) sentimentLabel = "中性";
+        else sentimentLabel = "偏空";
 
         o.put("sentimentIndex", sentimentIndex);
         o.put("sentimentLabel", sentimentLabel);
@@ -103,7 +127,7 @@ public class InsightController {
         for (Intelligence i : intels) {
             if (i.getTags() == null) continue;
             for (String tag : i.getTags().split(",")) {
-                tag = tag.trim();
+                tag = translateTag(tag.trim());
                 if (!tag.isEmpty()) tagCounts.merge(tag, 1L, Long::sum);
             }
         }
@@ -114,6 +138,9 @@ public class InsightController {
                 .limit(limit)
                 .toList();
 
+        // Use relative scoring: top tag gets 99, others scale proportionally
+        long maxCount = sorted.isEmpty() ? 1 : sorted.get(0).getValue();
+
         List<Map<String, Object>> result = new ArrayList<>();
         int rank = 1;
         for (var entry : sorted) {
@@ -121,8 +148,9 @@ public class InsightController {
             s.put("rank", rank++);
             s.put("name", entry.getKey());
             s.put("intelCount", entry.getValue());
-            // Heat score: count * 10, capped at 99
-            s.put("heatScore", Math.min(99, entry.getValue() * 10));
+            // Heat score: proportional to max, range 20-99
+            long heatScore = Math.max(20, Math.round((double) entry.getValue() / maxCount * 99));
+            s.put("heatScore", heatScore);
             result.add(s);
         }
         return result;

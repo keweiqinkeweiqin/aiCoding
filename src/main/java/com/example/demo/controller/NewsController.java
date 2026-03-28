@@ -115,7 +115,26 @@ public class NewsController {
             return emitter;
         }
         emitter.onTimeout(emitter::complete);
-        new Thread(() -> smartQueryService.streamQuery(question, emitter)).start();
+        new Thread(() -> smartQueryService.streamQuery(question, List.of(), emitter)).start();
+        return emitter;
+    }
+
+    /** 多轮对话（流式）：支持 history 上下文 */
+    @PostMapping("/chat/stream")
+    public SseEmitter chatStream(@RequestBody Map<String, Object> body) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        String question = (String) body.get("question");
+        if (question == null || question.isBlank()) {
+            try {
+                emitter.send(SseEmitter.event().name("error").data("question不能为空"));
+                emitter.complete();
+            } catch (Exception ignored) {}
+            return emitter;
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> history = (List<Map<String, String>>) body.getOrDefault("history", List.of());
+        emitter.onTimeout(emitter::complete);
+        new Thread(() -> smartQueryService.streamQuery(question, history, emitter)).start();
         return emitter;
     }
 

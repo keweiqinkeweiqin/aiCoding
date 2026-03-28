@@ -38,6 +38,9 @@ public class AnalysisService {
     @Value("${spring.ai.openai.api-key}")
     private String apiKey;
 
+    @Value("${spring.ai.openai.chat.options.model:GPT-5.4}")
+    private String modelName;
+
     public AnalysisService(IntelligenceRepository intelligenceRepository,
                            UserRepository userRepository,
                            UserProfileRepository userProfileRepository,
@@ -55,65 +58,37 @@ public class AnalysisService {
     // ==================== Task 2.1: Prompt Building ====================
 
     String buildSystemPrompt() {
-        return "你是「华尔街之眼」AI 投研助手，专注 AI 与科技投资领域的个性化研判分析。\n\n"
-                + "你必须严格按以下 JSON 格式返回结果，不要包含任何其他文本：\n"
-                + "{\n"
-                + "  \"analysis\": \"情报研判文本，200字以内，概述核心影响\",\n"
-                + "  \"impacts\": [\n"
-                + "    {\n"
-                + "      \"stock\": \"股票代码\",\n"
-                + "      \"impact\": \"对该股票的影响分析\",\n"
-                + "      \"level\": \"重大影响|中等影响|正面影响\",\n"
-                + "      \"volatility\": \"预计波动幅度描述\",\n"
-                + "      \"revenueImpact\": \"对营收的影响分析\",\n"
-                + "      \"longTermImpact\": \"长期影响分析\"\n"
-                + "    }\n"
-                + "  ],\n"
-                + "  \"suggestion\": \"基于用户画像的操作建议\",\n"
-                + "  \"risks\": [\"风险提示1\", \"风险提示2\"],\n"
-                + "  \"userContext\": \"说明该建议基于何种画像生成\"\n"
-                + "}\n\n"
-                + "分析维度要求：\n"
-                + "- 影响等级定义：重大影响(直接影响核心业务)、中等影响(间接关联)、正面影响(利好因素)\n"
-                + "- 波动预估：给出具体百分比区间\n"
-                + "- 风险提示：至少给出2条具体风险\n"
-                + "- 操作建议：结合用户投资者类型和风险偏好给出";
+        return "AI投研助手。严格返回JSON，无其他文本：\n"
+                + "{\"analysis\":\"研判概述(150字内)\","
+                + "\"impacts\":[{\"stock\":\"代码\",\"impact\":\"影响\",\"level\":\"重大影响|中等影响|正面影响\",\"volatility\":\"±X%\"}],"
+                + "\"suggestion\":\"操作建议\","
+                + "\"risks\":[\"风险1\",\"风险2\"],"
+                + "\"userContext\":\"基于XX画像\"}";
     }
 
     String buildUserPrompt(Intelligence intel, UserProfile profile, List<UserHolding> holdings) {
         StringBuilder sb = new StringBuilder();
-        sb.append("## 情报信息\n");
-        sb.append("- 标题：").append(intel.getTitle()).append("\n");
-        sb.append("- 摘要：").append(intel.getSummary()).append("\n");
-        sb.append("- 关联股票：").append(intel.getRelatedStocks()).append("\n");
-        sb.append("- 情感倾向：").append(intel.getSentiment()).append("\n");
-        sb.append("- 标签：").append(intel.getTags()).append("\n");
-        sb.append("\n## 用户投资画像\n");
-        sb.append("- 投资者类型：").append(profile.getInvestorType()).append("\n");
-        sb.append("- 投资周期：").append(profile.getInvestmentCycle()).append("\n");
-        sb.append("- 关注领域：").append(profile.getFocusAreas()).append("\n");
-        sb.append("\n## 用户持仓\n");
-        if (holdings != null && !holdings.isEmpty()) {
-            for (UserHolding h : holdings) {
-                sb.append("- ").append(h.getStockCode());
-                if (h.getStockName() != null && !h.getStockName().isBlank()) {
-                    sb.append(" (").append(h.getStockName()).append(")");
-                }
-                if (h.getPercentage() != null) {
-                    sb.append(" 持仓占比:").append(h.getPercentage()).append("%");
-                }
-                if (h.getCostPrice() != null) {
-                    sb.append(" 成本价:$").append(h.getCostPrice());
-                }
-                if (h.getSector() != null && !h.getSector().isBlank()) {
-                    sb.append(" 行业:").append(h.getSector());
-                }
-                sb.append("\n");
-            }
-        } else {
-            sb.append("- 暂无持仓\n");
+        sb.append("情报:").append(intel.getTitle());
+        if (intel.getSummary() != null && !intel.getSummary().isBlank()) {
+            String summary = intel.getSummary().length() > 150
+                    ? intel.getSummary().substring(0, 150) + "..." : intel.getSummary();
+            sb.append("\n摘要:").append(summary);
         }
-        sb.append("\n请基于以上信息生成个性化研判分析。");
+        if (intel.getRelatedStocks() != null) sb.append("\n股票:").append(intel.getRelatedStocks());
+        if (intel.getSentiment() != null) sb.append(" 情感:").append(intel.getSentiment());
+
+        sb.append("\n画像:").append(profile.getInvestorType())
+          .append("/").append(profile.getInvestmentCycle())
+          .append(" 关注:").append(profile.getFocusAreas());
+
+        if (holdings != null && !holdings.isEmpty()) {
+            sb.append("\n持仓:");
+            for (UserHolding h : holdings) {
+                sb.append(h.getStockCode());
+                if (h.getPercentage() != null) sb.append("(").append(h.getPercentage()).append("%)");
+                sb.append(",");
+            }
+        }
         return sb.toString();
     }
 
@@ -125,7 +100,7 @@ public class AnalysisService {
         headers.set("Authorization", "Bearer " + apiKey);
 
         Map<String, Object> body = Map.of(
-                "model", "Qwen3.5-flash",
+                "model", modelName,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userPrompt)
@@ -174,11 +149,11 @@ public class AnalysisService {
         userRepository.findById(userId)
                 .orElseThrow(() -> new NoSuchElementException("用户不存在"));
 
-        // Cache check: 1 hour validity
+        // Cache check: 24 hour validity
         Optional<AnalysisRecord> cached = analysisRecordRepository
                 .findFirstByUserIdAndNewsArticleIdOrderByCreatedAtDesc(userId, articleId);
         if (cached.isPresent() &&
-                cached.get().getCreatedAt().isAfter(LocalDateTime.now().minusHours(1))) {
+                cached.get().getCreatedAt().isAfter(LocalDateTime.now().minusHours(24))) {
             try {
                 return objectMapper.readValue(cached.get().getAnalysisText(),
                         new TypeReference<Map<String, Object>>() {});

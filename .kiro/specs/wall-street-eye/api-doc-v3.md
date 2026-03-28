@@ -503,7 +503,7 @@ overview 说明：
 
 sectors 说明：
 - 基于 Intelligence.tags 聚合计数
-- `heatScore` = min(99, intelCount * 10)
+- `heatScore` = 按比例计算，最高标签得 99 分，其余按 intelCount 占比缩放，最低 20
 
 events 说明：
 - 按时间倒序的情报列表

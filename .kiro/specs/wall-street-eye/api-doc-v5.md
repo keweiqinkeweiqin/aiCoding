@@ -72,6 +72,7 @@ Response:
 - 未登录时 nickname 为"访客"，profileTag 为空
 - sentimentLabel 取值：偏多 / 中性 / 偏空
 - marketStatus 取值：市场情绪偏多/偏空/中性 + 情报数量
+- hotTags 中的英文标签会自动翻译为中文（如 chip→芯片、semiconductor→半导体、robot→机器人、cloud→云计算、LLM→大模型等），未在映射表中的标签保持原样
 - 首页不再内嵌推荐情报列表，情报数据请通过 `GET /api/intelligences` 单独获取
 
 ---
@@ -231,13 +232,13 @@ Response:
   "code": 200,
   "data": {
     "overview": {
-      "sentimentIndex": 68, "sentimentLabel": "Greed",
+      "sentimentIndex": 68, "sentimentLabel": "中性",
       "totalIntelligences": 156, "positiveCount": 106, "negativeCount": 25,
       "aiHeatPercent": 92, "stockUp": 30, "stockDown": 15,
       "trendData": [{ "date": "2026-03-21", "value": 55 }, { "date": "2026-03-27", "value": 68 }]
     },
     "sectors": [
-      { "rank": 1, "name": "AI", "intelCount": 32, "heatScore": 96 }
+      { "rank": 1, "name": "AI", "intelCount": 32, "heatScore": 99 }
     ],
     "events": [
       { "id": 1, "time": "2026-03-27T08:32:00", "title": "...",
@@ -250,6 +251,10 @@ Response:
   }
 }
 ```
+
+sectors 说明：
+- 基于 Intelligence.tags 聚合计数，取 Top 5
+- `heatScore`：按比例计算，排名第一的标签得 99 分，其余按 intelCount 占比缩放，最低 20
 
 ---
 
@@ -470,6 +475,32 @@ es.addEventListener('done', () => es.close());
 - LLM 模型名从 `application.yml` 的 `spring.ai.openai.chat.options.model` 读取（当前为 GPT-5.4）
 - 后端兼容 `data: {json}` 和 `data:{json}` 两种 SSE 格式（部分 LLM 平台省略空格）
 - 原有 `POST /api/query` 同步接口保留，可用于不支持 SSE 的场景
+
+### POST /api/chat/stream — 多轮对话（流式，支持 history 上下文）
+
+Request:
+```json
+{
+  "question": "那英伟达的竞争对手呢？",
+  "history": [
+    { "role": "user", "content": "AI芯片行业最近有什么重大变化？" },
+    { "role": "assistant", "content": "根据最新情报，英伟达发布了B300芯片..." }
+  ]
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| question | string | 是 | 当前用户问题 |
+| history | array | 否 | 历史对话数组，每项含 `role`（user/assistant）和 `content`，默认空数组 |
+
+返回 SSE 事件流，事件格式与 `GET /api/query/stream` 完全一致（meta → reasoning → token → done）。
+
+说明：
+- 超时时间 120 秒
+- `history` 为空数组时行为等同于 `GET /api/query/stream`（单轮问答）
+- 使用 POST 方法以支持较长的 history body
+- 前端需使用 `fetch` + `ReadableStream` 消费（`EventSource` 仅支持 GET）
 
 ---
 

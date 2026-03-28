@@ -218,7 +218,7 @@ public class SmartQueryService {
      *   event: done     — empty, signals completion
      *   event: error    — error message
      */
-    public void streamQuery(String userQuestion, SseEmitter emitter) {
+    public void streamQuery(String userQuestion, List<Map<String, String>> history, SseEmitter emitter) {
         try {
             // 1. 混合检索：语义搜索 + 关键词 fallback → 情报级别
             List<RankedIntelligence> ranked = hybridSearch(userQuestion, 10);
@@ -251,13 +251,33 @@ public class SmartQueryService {
                     "## 相关情报（共%d条，按相关度排序，已聚合去重）\n\n%s\n\n## 用户问题\n%s\n\n请基于以上情报数据进行分析和回答。",
                     ranked.size(), context, userQuestion);
 
-            // 4. Call LLM with stream=true
+            // 4. Build messages with history (keep last 5 rounds max)
+            List<Map<String, String>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+
+            // Append conversation history (last 5 rounds = 10 messages)
+            if (history != null && !history.isEmpty()) {
+                List<Map<String, String>> trimmed = history.size() > 10
+                        ? history.subList(history.size() - 10, history.size()) : history;
+                for (Map<String, String> msg : trimmed) {
+                    String role = msg.getOrDefault("role", "");
+                    String content = msg.getOrDefault("content", "");
+                    if (("user".equals(role) || "assistant".equals(role)) && !content.isBlank()) {
+                        // Truncate old assistant messages to save tokens
+                        if ("assistant".equals(role) && content.length() > 500) {
+                            content = content.substring(0, 500) + "...";
+                        }
+                        messages.add(Map.of("role", role, "content", content));
+                    }
+                }
+            }
+
+            messages.add(Map.of("role", "user", "content", userPrompt));
+
+            // 5. Call LLM with stream=true
             Map<String, Object> reqBody = Map.of(
                     "model", modelName,
-                    "messages", List.of(
-                            Map.of("role", "system", "content", systemPrompt),
-                            Map.of("role", "user", "content", userPrompt)
-                    ),
+                    "messages", messages,
                     "temperature", 0.3,
                     "stream", true
             );
