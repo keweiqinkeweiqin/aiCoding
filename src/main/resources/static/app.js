@@ -1,9 +1,9 @@
 // ============================================================
-// 华尔街之眼 — 调试面板 (app.js)
+// 华尔街之眼 — 调试面板 (app.js) — v2 rewrite
 // ============================================================
 
 const API = '';
-const USER_HEADERS = { 'X-User-Id': localStorage.getItem('userId') || '0' };
+let currentUserId = 1;
 
 // === Utility ===
 
@@ -69,11 +69,10 @@ function switchTab(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
 
-  // Load data on tab switch
   if (name === 'news') loadNews();
   if (name === 'intel') loadIntelligences();
   if (name === 'analysis') loadAnalysisHistory();
-  if (name === 'profile') loadProfile();
+  if (name === 'profile') { loadUserList(); loadProfile(); }
   if (name === 'market') loadMarket();
   if (name === 'logs') { startLogPolling(); loadLogs(); }
   else stopLogPolling();
@@ -90,9 +89,8 @@ async function loadStats() {
     document.getElementById('statNews').textContent = d.totalNews ?? '-';
     document.getElementById('statVector').textContent = d.vectorCacheSize ?? '-';
     document.getElementById('statMarket').textContent = d.totalMarket ?? '-';
-    // Intelligence count from list endpoint
     try {
-      const r2 = await fetch(API + '/api/intelligences?hours=720&page=0&size=1');
+      const r2 = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=720&page=0&size=1');
       const d2 = await r2.json();
       document.getElementById('statIntel').textContent = d2.data?.totalElements ?? '-';
     } catch (_) {
@@ -215,7 +213,7 @@ async function loadNews() {
 }
 
 // ============================================================
-// 3. 情报中心 Panel (Core)
+// 3. 情报中心 Panel
 // ============================================================
 
 let expandedIntelId = null;
@@ -254,7 +252,7 @@ async function loadIntelligences() {
   el.innerHTML = '<div class="loading">加载中</div>';
   expandedIntelId = null;
   try {
-    const r = await fetch(API + '/api/intelligences?hours=72&page=0&size=50');
+    const r = await fetch(API + '/api/intelligences?userId=' + currentUserId + '&hours=72&page=0&size=50');
     const d = await r.json();
     const items = d.data?.content;
     if (!items || !items.length) {
@@ -297,14 +295,12 @@ async function toggleIntelDetail(id) {
   const detailEl = document.getElementById('intel-detail-' + id);
   if (!detailEl) return;
 
-  // Collapse if already expanded
   if (expandedIntelId === id) {
     detailEl.innerHTML = '';
     expandedIntelId = null;
     return;
   }
 
-  // Collapse previous
   if (expandedIntelId !== null) {
     const prev = document.getElementById('intel-detail-' + expandedIntelId);
     if (prev) prev.innerHTML = '';
@@ -314,19 +310,63 @@ async function toggleIntelDetail(id) {
   detailEl.innerHTML = '<div class="loading" style="margin-top:12px">加载详情</div>';
 
   try {
-    // Fetch detail and related in parallel
-    const [detailRes, relatedRes] = await Promise.all([
-      fetch(API + '/api/intelligences/' + id),
-      fetch(API + '/api/intelligences/' + id + '/related?limit=5')
-    ]);
+    const detailRes = await fetch(API + '/api/intelligences/' + id + '?userId=' + currentUserId);
     const detail = (await detailRes.json()).data;
-    const related = (await relatedRes.json()).data || [];
 
     let html = `<div class="intel-detail-inline" onclick="event.stopPropagation()">`;
 
     // Content
     if (detail.content) {
       html += `<div style="font-size:14px;color:#e0e0e0;line-height:1.8;margin-bottom:16px;padding:14px;background:#0a0e27;border-radius:8px;white-space:pre-wrap;max-height:400px;overflow-y:auto">${esc(detail.content)}</div>`;
+    }
+
+    // === Personalized Analysis Section ===
+    if (detail.personalizedAnalysis) {
+      const pa = detail.personalizedAnalysis;
+      html += `<div style="margin-bottom:16px;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-radius:10px">`;
+      html += `<div style="font-size:14px;color:#c4b5fd;margin-bottom:12px;font-weight:600">🎯 个性化研判</div>`;
+
+      // User profile card
+      if (pa.userProfile) {
+        const up = pa.userProfile;
+        html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">`;
+        if (up.investorType) html += `<span class="tag tag-active">类型: ${esc(up.investorType)}</span>`;
+        if (up.investmentCycle) html += `<span class="tag tag-active">周期: ${esc(up.investmentCycle)}</span>`;
+        if (up.focusAreas) html += `<span class="tag tag-active">关注: ${esc(up.focusAreas)}</span>`;
+        html += `</div>`;
+      }
+
+      // Impacts
+      if (pa.impacts && pa.impacts.length) {
+        html += `<div style="margin-bottom:12px"><div style="font-size:13px;color:#ffd700;margin-bottom:8px;font-weight:600">📊 影响分析</div>`;
+        pa.impacts.forEach(imp => {
+          html += `<div class="impact-card">
+            <div class="impact-stock">${esc(imp.stock || imp.stockCode || '')}</div>
+            <div class="impact-row"><span class="impact-label">影响:</span> <span style="color:#e0e0e0">${esc(imp.impact || imp.description || '')}</span></div>
+            ${imp.level ? `<div class="impact-row"><span class="impact-label">级别:</span> <span style="color:#fbbf24">${esc(imp.level)}</span></div>` : ''}
+            ${imp.volatility ? `<div class="impact-row"><span class="impact-label">波动:</span> <span>${esc(imp.volatility)}</span></div>` : ''}
+          </div>`;
+        });
+        html += `</div>`;
+      }
+
+      // Suggestion
+      if (pa.suggestion) {
+        html += `<div style="margin-bottom:12px;padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
+          <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
+          <div style="font-size:13px;color:#e0e0e0">${esc(pa.suggestion)}</div>
+        </div>`;
+      }
+
+      // Risks
+      if (pa.risks && pa.risks.length) {
+        html += `<div style="padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
+          <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
+          ${pa.risks.map(r => `<div style="font-size:12px;color:#f87171;padding:2px 0">• ${esc(r)}</div>`).join('')}
+        </div>`;
+      }
+
+      html += `</div>`;
     }
 
     // Sources
@@ -354,19 +394,6 @@ async function toggleIntelDetail(id) {
       </div>`;
     }
 
-    // Related intelligences
-    if (related.length) {
-      html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid #2a3070">
-        <div style="font-size:13px;color:#7c3aed;margin-bottom:8px;font-weight:600">🔗 相关情报</div>`;
-      related.forEach(ri => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(42,48,112,0.4);cursor:pointer" onclick="event.stopPropagation();toggleIntelDetail(${ri.id})">
-          <div style="font-size:13px;color:#c0c0c0">${esc(ri.title)}</div>
-          <div style="font-size:11px;color:#6b7280;white-space:nowrap;margin-left:12px">${ri.sourceCount || 1}源 · ${timeAgo(ri.latestArticleTime)}</div>
-        </div>`;
-      });
-      html += '</div>';
-    }
-
     html += '</div>';
     detailEl.innerHTML = html;
   } catch (e) {
@@ -375,16 +402,20 @@ async function toggleIntelDetail(id) {
 }
 
 // ============================================================
-// 4. AI研判 Panel (NEW)
+// 4. AI研判 Panel
 // ============================================================
 
 function initAnalysisPanel() {
   document.getElementById('panel-analysis').innerHTML = `
     <div class="section-title">🧠 AI研判分析</div>
     <div style="display:flex;gap:10px;margin-bottom:20px;align-items:flex-end;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px">
+      <div style="flex:1;min-width:160px">
         <label style="font-size:12px;color:#8890b5;display:block;margin-bottom:6px">情报ID</label>
         <input id="analysisArticleId" type="number" class="input" placeholder="输入情报ID（如 1）" min="1">
+      </div>
+      <div style="min-width:100px">
+        <label style="font-size:12px;color:#8890b5;display:block;margin-bottom:6px">用户ID</label>
+        <input id="analysisUserId" type="number" class="input" placeholder="userId" style="width:100px">
       </div>
       <button onclick="generateAnalysis()" class="btn btn-purple" id="btnAnalysis">🧠 生成研判</button>
       <button onclick="loadAnalysisHistory()" class="btn btn-ghost">刷新历史</button>
@@ -395,12 +426,18 @@ function initAnalysisPanel() {
       <div id="analysisHistory"></div>
     </div>
   `;
+  // Sync userId input with currentUserId
+  const uidInput = document.getElementById('analysisUserId');
+  if (uidInput) uidInput.value = currentUserId;
 }
 
 async function generateAnalysis() {
   const idInput = document.getElementById('analysisArticleId');
   const articleId = parseInt(idInput.value);
   if (!articleId || articleId < 1) { alert('请输入有效的情报ID'); return; }
+
+  const uidInput = document.getElementById('analysisUserId');
+  const uid = parseInt(uidInput.value) || currentUserId;
 
   const btn = document.getElementById('btnAnalysis');
   const result = document.getElementById('analysisResult');
@@ -409,14 +446,14 @@ async function generateAnalysis() {
   result.innerHTML = '<div class="loading">正在调用AI生成研判分析，请稍候</div>';
 
   try {
-    const r = await fetch(API + '/api/analysis/generate?userId=' + USER_ID, {
+    const r = await fetch(API + '/api/analysis/generate?userId=' + uid, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ articleId, userId: parseInt(USER_ID) })
+      body: JSON.stringify({ articleId })
     });
     if (!r.ok) {
-      const err = await r.json();
-      throw new Error(err.error || '请求失败');
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || '请求失败 (' + r.status + ')');
     }
     const d = await r.json();
     result.innerHTML = renderAnalysisResult(d);
@@ -431,17 +468,14 @@ async function generateAnalysis() {
 function renderAnalysisResult(d) {
   let html = '<div class="card" style="border-color:#7c3aed">';
 
-  // Main analysis text
   if (d.analysis) {
     html += `<div style="font-size:14px;color:#e0e0e0;line-height:1.8;margin-bottom:16px;padding:14px;background:#0a0e27;border-radius:8px;white-space:pre-wrap">${esc(d.analysis)}</div>`;
   }
 
-  // User context
   if (d.userContext) {
     html += `<div style="font-size:12px;color:#8890b5;margin-bottom:16px;padding:8px 12px;background:rgba(124,58,237,0.1);border-radius:6px;border-left:3px solid #7c3aed">👤 ${esc(d.userContext)}</div>`;
   }
 
-  // Impacts per stock
   if (d.impacts && d.impacts.length) {
     html += '<div style="margin-bottom:16px"><div style="font-size:14px;color:#ffd700;margin-bottom:10px;font-weight:600">📊 个股影响分析</div>';
     d.impacts.forEach(imp => {
@@ -457,7 +491,6 @@ function renderAnalysisResult(d) {
     html += '</div>';
   }
 
-  // Suggestion
   if (d.suggestion) {
     html += `<div style="margin-bottom:12px;padding:12px;background:rgba(34,197,94,0.1);border-radius:8px;border-left:3px solid #22c55e">
       <div style="font-size:12px;color:#22c55e;margin-bottom:4px;font-weight:600">💡 投资建议</div>
@@ -465,7 +498,6 @@ function renderAnalysisResult(d) {
     </div>`;
   }
 
-  // Risks
   if (d.risks && d.risks.length) {
     html += `<div style="padding:12px;background:rgba(239,68,68,0.1);border-radius:8px;border-left:3px solid #ef4444">
       <div style="font-size:12px;color:#ef4444;margin-bottom:6px;font-weight:600">⚠️ 风险提示</div>
@@ -482,7 +514,7 @@ async function loadAnalysisHistory() {
   if (!el) return;
   el.innerHTML = '<div class="loading">加载中</div>';
   try {
-    const r = await fetch(API + '/api/analysis/history?userId=' + USER_ID, { headers: {} });
+    const r = await fetch(API + '/api/analysis/history?userId=' + currentUserId);
     if (!r.ok) throw new Error('请求失败');
     const records = await r.json();
     if (!records.length) {
@@ -496,22 +528,28 @@ async function loadAnalysisHistory() {
         ? (parsed.suggestion || parsed.analysis || '').substring(0, 100)
         : (rec.analysisText || '').substring(0, 100);
       return `
-      <div class="card card-clickable" onclick="showHistoryDetail(this, '${esc(rec.analysisText?.replace(/'/g, "\\'").replace(/\n/g, "\\n"))}')">
+      <div class="card card-clickable" onclick="toggleHistoryDetail(this)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <span style="font-size:13px;color:#e0e0e0">情报 #${rec.newsArticleId}</span>
           <span style="font-size:11px;color:#6b7280">${timeAgo(rec.createdAt)}</span>
         </div>
         <div style="font-size:12px;color:#9ca3af">${esc(summary)}...</div>
         <div style="font-size:11px;color:#8890b5;margin-top:4px">风格: ${esc(rec.investmentStyle || '-')}</div>
-        <div class="history-detail-slot"></div>
+        <div class="history-detail-slot" style="display:none" data-raw="${esc(rec.analysisText || '')}"></div>
       </div>`;
     }).join('');
   } catch (e) { el.innerHTML = `<div style="color:#ef4444;font-size:13px">加载失败: ${e.message}</div>`; }
 }
 
-function showHistoryDetail(cardEl, rawText) {
+function toggleHistoryDetail(cardEl) {
   const slot = cardEl.querySelector('.history-detail-slot');
-  if (slot.innerHTML) { slot.innerHTML = ''; return; }
+  if (slot.style.display !== 'none') {
+    slot.style.display = 'none';
+    slot.innerHTML = '';
+    return;
+  }
+  const rawText = slot.dataset.raw;
+  slot.style.display = 'block';
   try {
     const d = JSON.parse(rawText);
     slot.innerHTML = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #2a3070">${renderAnalysisResult(d)}</div>`;
@@ -521,7 +559,7 @@ function showHistoryDetail(cardEl, rawText) {
 }
 
 // ============================================================
-// 5. 用户画像 Panel (NEW)
+// 5. 用户画像 Panel (upgraded with holdings management)
 // ============================================================
 
 const INVESTOR_TYPES = [
@@ -551,13 +589,30 @@ const FOCUS_OPTIONS = [
 ];
 
 let profileData = {};
+let holdingsList = [];
 
 function initProfilePanel() {
   document.getElementById('panel-profile').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-      <div class="section-title" style="margin-bottom:0">👤 用户画像</div>
+      <div class="section-title" style="margin-bottom:0">👤 用户管理 & 画像</div>
       <button onclick="saveProfile()" class="btn btn-primary" id="btnSaveProfile">💾 保存画像</button>
     </div>
+
+    <!-- User selector row -->
+    <div style="margin-bottom:16px;padding:14px;background:#151a40;border:1px solid #2a3070;border-radius:10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:#8890b5">当前用户:</span>
+        <input id="currentUserIdInput" class="input" style="width:100px" value="${currentUserId}" placeholder="userId">
+        <button onclick="loadProfileForUser()" class="btn btn-ghost">📥 Load</button>
+        <button onclick="loginNewUser()" class="btn btn-purple">📱 Login</button>
+        <button onclick="loadUserList()" class="btn btn-ghost">👥 用户列表</button>
+      </div>
+    </div>
+
+    <!-- User list (loaded on demand) -->
+    <div id="userListSection" style="margin-bottom:16px"></div>
+
+    <!-- Profile form -->
     <div class="profile-grid">
       <div>
         <div class="profile-field">
@@ -571,34 +626,124 @@ function initProfilePanel() {
       </div>
       <div>
         <div class="profile-field">
-          <label>持仓股票（逗号分隔，如 NVDA,TSM,AAPL）</label>
-          <input id="profileHoldings" class="input" placeholder="NVDA,TSM">
+          <label>关注领域（点击切换）</label>
+          <div id="profileFocusAreas" style="display:flex;gap:6px;flex-wrap:wrap"></div>
         </div>
       </div>
     </div>
-    <div class="profile-field" style="margin-top:8px">
-      <label>关注领域（点击切换）</label>
-      <div id="profileFocusAreas" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+
+    <!-- Holdings management -->
+    <div style="margin-top:20px;padding:16px;background:#151a40;border:1px solid #2a3070;border-radius:10px">
+      <div style="font-size:14px;color:#ffd700;margin-bottom:12px;font-weight:600">📦 持仓管理</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">股票代码</label>
+          <input id="holdingCodeInput" class="input" style="width:120px" placeholder="如 NVDA">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">股票名称</label>
+          <input id="holdingNameInput" class="input" style="width:140px" placeholder="如 NVIDIA">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8890b5;display:block;margin-bottom:4px">板块(可选)</label>
+          <input id="holdingSectorInput" class="input" style="width:120px" placeholder="如 semiconductor">
+        </div>
+        <button onclick="addHolding()" class="btn btn-success">➕ 添加</button>
+      </div>
+      <div id="holdingsListContainer"></div>
     </div>
+
     <div id="profileStatus" style="margin-top:12px;font-size:13px"></div>
   `;
 }
 
+async function loadUserList() {
+  const el = document.getElementById('userListSection');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">加载用户列表</div>';
+  try {
+    const r = await fetch(API + '/api/auth/users');
+    const d = await r.json();
+    const users = d.data || d || [];
+    if (!users.length) {
+      el.innerHTML = '<div style="color:#8890b5;font-size:13px">暂无用户，请先登录创建</div>';
+      return;
+    }
+    el.innerHTML = '<div style="font-size:13px;color:#8890b5;margin-bottom:8px">已注册用户 (' + users.length + ')</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">' +
+      users.map(u => `<div class="card card-clickable" style="min-width:180px;flex:0 1 auto;padding:10px 14px" onclick="selectUser(${u.userId || u.id})">
+        <div style="font-size:14px;color:#e0e0e0;font-weight:600">${esc(u.nickname || u.phone)} <span style="font-size:11px;color:#6b7280">#${u.userId || u.id}</span></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px">${esc(u.phone || '')}</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:2px">${timeAgo(u.lastLoginAt || u.createdAt)}</div>
+      </div>`).join('') + '</div>';
+  } catch (e) { el.innerHTML = '<div style="color:#ef4444;font-size:13px">加载失败: ' + e.message + '</div>'; }
+}
+
+function selectUser(id) {
+  currentUserId = id;
+  const input = document.getElementById('currentUserIdInput');
+  if (input) input.value = id;
+  // Also sync analysis panel userId
+  const aInput = document.getElementById('analysisUserId');
+  if (aInput) aInput.value = id;
+  loadProfile();
+  loadHoldings();
+}
+
+function loadProfileForUser() {
+  const input = document.getElementById('currentUserIdInput');
+  const id = parseInt(input.value);
+  if (!id || id < 1) { alert('请输入有效的用户ID'); return; }
+  currentUserId = id;
+  // Sync analysis panel
+  const aInput = document.getElementById('analysisUserId');
+  if (aInput) aInput.value = id;
+  loadProfile();
+  loadHoldings();
+}
+
+async function loginNewUser() {
+  const phone = prompt('输入手机号:');
+  if (!phone) return;
+  const nickname = prompt('昵称 (可选):') || '';
+  try {
+    const r = await fetch(API + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, nickname: nickname || undefined })
+    });
+    const d = await r.json();
+    const userData = d.data || d;
+    if (userData && (userData.userId || userData.id)) {
+      const uid = userData.userId || userData.id;
+      alert((userData.isNew ? '注册成功' : '登录成功') + ': userId=' + uid + ', nickname=' + (userData.nickname || ''));
+      currentUserId = uid;
+      const input = document.getElementById('currentUserIdInput');
+      if (input) input.value = uid;
+      const aInput = document.getElementById('analysisUserId');
+      if (aInput) aInput.value = uid;
+      loadProfile();
+      loadHoldings();
+      loadUserList();
+    }
+  } catch (e) { alert('登录失败: ' + e.message); }
+}
+
 async function loadProfile() {
   try {
-    const r = await fetch(API + '/api/profile?userId=' + USER_ID, { headers: {} });
+    const r = await fetch(API + '/api/profile?userId=' + currentUserId);
     const d = await r.json();
-    profileData = d.data || {};
+    profileData = d.data || d || {};
   } catch (e) {
     profileData = {};
   }
   renderProfileForm();
+  loadHoldings();
 }
 
 function renderProfileForm() {
   const p = profileData;
 
-  // Investor type buttons
   const typeEl = document.getElementById('profileInvestorType');
   if (typeEl) {
     typeEl.innerHTML = INVESTOR_TYPES.map(t =>
@@ -606,7 +751,6 @@ function renderProfileForm() {
     ).join('');
   }
 
-  // Cycle buttons
   const cycleEl = document.getElementById('profileCycle');
   if (cycleEl) {
     cycleEl.innerHTML = INVESTMENT_CYCLES.map(c =>
@@ -614,11 +758,6 @@ function renderProfileForm() {
     ).join('');
   }
 
-  // Holdings
-  const holdingsEl = document.getElementById('profileHoldings');
-  if (holdingsEl) holdingsEl.value = p.holdings || '';
-
-  // Focus areas
   const focusEl = document.getElementById('profileFocusAreas');
   if (focusEl) {
     const selected = (p.focusAreas || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -653,20 +792,17 @@ async function saveProfile() {
   btn.disabled = true;
   btn.textContent = '⏳ 保存中...';
 
-  const holdings = document.getElementById('profileHoldings')?.value || '';
-
   try {
-    const r = await fetch(API + '/api/profile?userId=' + USER_ID, {
+    const r = await fetch(API + '/api/profile?userId=' + currentUserId, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         investorType: profileData.investorType || '',
         investmentCycle: profileData.investmentCycle || '',
-        focusAreas: profileData.focusAreas || '',
-        holdings: holdings
+        focusAreas: profileData.focusAreas || ''
       })
     });
-    const d = await r.json();
+    await r.json();
     status.innerHTML = '<span style="color:#22c55e">✅ 画像已保存</span>';
     setTimeout(() => { if (status) status.innerHTML = ''; }, 3000);
   } catch (e) {
@@ -674,6 +810,83 @@ async function saveProfile() {
   }
   btn.disabled = false;
   btn.textContent = '💾 保存画像';
+}
+
+// --- Holdings CRUD ---
+
+async function loadHoldings() {
+  const el = document.getElementById('holdingsListContainer');
+  if (!el) return;
+  el.innerHTML = '<div class="loading">加载持仓</div>';
+  try {
+    const r = await fetch(API + '/api/profile/holdings?userId=' + currentUserId);
+    const d = await r.json();
+    holdingsList = d.data || d || [];
+    renderHoldings();
+  } catch (e) {
+    holdingsList = [];
+    el.innerHTML = '<div style="color:#6b7280;font-size:12px">加载持仓失败: ' + e.message + '</div>';
+  }
+}
+
+function renderHoldings() {
+  const el = document.getElementById('holdingsListContainer');
+  if (!el) return;
+  if (!holdingsList.length) {
+    el.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:8px 0">暂无持仓，请添加</div>';
+    return;
+  }
+  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+    holdingsList.map(h => {
+      const hId = h.id || h.holdingId;
+      return `<div class="card" style="display:flex;align-items:center;gap:10px;padding:8px 14px;min-width:200px;flex:0 1 auto">
+        <div style="flex:1">
+          <div style="font-size:14px;color:#ffd700;font-weight:600">${esc(h.stockCode)}</div>
+          <div style="font-size:12px;color:#e0e0e0">${esc(h.stockName || '')}</div>
+          ${h.sector ? `<div style="font-size:11px;color:#6b7280">${esc(h.sector)}</div>` : ''}
+        </div>
+        <button onclick="deleteHolding(${hId})" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;color:#ef4444;border-color:#ef4444">✕</button>
+      </div>`;
+    }).join('') + '</div>';
+}
+
+async function addHolding() {
+  const codeInput = document.getElementById('holdingCodeInput');
+  const nameInput = document.getElementById('holdingNameInput');
+  const sectorInput = document.getElementById('holdingSectorInput');
+  const stockCode = (codeInput.value || '').trim().toUpperCase();
+  const stockName = (nameInput.value || '').trim();
+  const sector = (sectorInput.value || '').trim();
+
+  if (!stockCode) { alert('请输入股票代码'); return; }
+  if (!stockName) { alert('请输入股票名称'); return; }
+
+  try {
+    const body = { stockCode, stockName };
+    if (sector) body.sector = sector;
+    const r = await fetch(API + '/api/profile/holdings?userId=' + currentUserId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || '添加失败');
+    }
+    codeInput.value = '';
+    nameInput.value = '';
+    sectorInput.value = '';
+    loadHoldings();
+  } catch (e) { alert('添加持仓失败: ' + e.message); }
+}
+
+async function deleteHolding(holdingId) {
+  if (!confirm('确认删除该持仓？')) return;
+  try {
+    const r = await fetch(API + '/api/profile/holdings/' + holdingId, { method: 'DELETE' });
+    if (!r.ok) throw new Error('删除失败');
+    loadHoldings();
+  } catch (e) { alert('删除失败: ' + e.message); }
 }
 
 // ============================================================

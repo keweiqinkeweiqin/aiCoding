@@ -1,6 +1,8 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.User;
+import com.example.demo.model.UserProfile;
+import com.example.demo.repository.UserProfileRepository;
 import com.example.demo.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +20,11 @@ import java.util.Map;
 public class AuthController {
 
     private final UserRepository userRepository;
+    private final UserProfileRepository userProfileRepository;
 
-    public AuthController(UserRepository userRepository) {
+    public AuthController(UserRepository userRepository, UserProfileRepository userProfileRepository) {
         this.userRepository = userRepository;
+        this.userProfileRepository = userProfileRepository;
     }
 
     /**
@@ -84,5 +88,44 @@ public class AuthController {
                 "userId", u.getId(),
                 "phone", u.getPhone(),
                 "nickname", u.getNickname() != null ? u.getNickname() : "")));
+    }
+
+    /** List all users (for debug panel) */
+    @GetMapping("/users")
+    public ResponseEntity<Map<String, Object>> listUsers() {
+        var users = userRepository.findAll();
+        var list = users.stream().map(u -> {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("userId", u.getId());
+            m.put("phone", u.getPhone());
+            m.put("nickname", u.getNickname() != null ? u.getNickname() : "");
+            m.put("createdAt", u.getCreatedAt());
+            m.put("lastLoginAt", u.getLastLoginAt());
+            return m;
+        }).toList();
+        return ResponseEntity.ok(Map.of("code", 200, "data", list));
+    }
+
+    /** Get user full info (user + profile) for debug panel */
+    @GetMapping("/user-detail")
+    public ResponseEntity<Map<String, Object>> userDetail(@RequestParam Long userId) {
+        var user = userRepository.findById(userId);
+        if (user.isEmpty()) return ResponseEntity.status(404).body(Map.of("code", 404, "message", "user not found"));
+        User u = user.get();
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("userId", u.getId());
+        data.put("phone", u.getPhone());
+        data.put("nickname", u.getNickname() != null ? u.getNickname() : "");
+        data.put("createdAt", u.getCreatedAt());
+        data.put("lastLoginAt", u.getLastLoginAt());
+        // Include profile
+        var profile = userProfileRepository.findByUserId(userId).orElse(null);
+        if (profile != null) {
+            data.put("investorType", profile.getInvestorType());
+            data.put("investmentCycle", profile.getInvestmentCycle());
+            data.put("focusAreas", profile.getFocusAreas());
+            data.put("holdings", profile.getHoldings());
+        }
+        return ResponseEntity.ok(Map.of("code", 200, "data", data));
     }
 }
